@@ -42,16 +42,17 @@ jobs:
           export PATH="\$HOME/.local/bin:\$PATH"
 
           echo "📜 Установка переменных окружения (MongoDB)"
-          echo "MONGO_HOST=${{ secrets.MONGO_HOST }}" >> ~/.bashrc
-          echo "MONGO_PORT=${{ secrets.MONGO_PORT }}" >> ~/.bashrc
-          echo "MONGO_USERNAME=${{ secrets.MONGO_USERNAME }}" >> ~/.bashrc
-          echo "MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }}" >> ~/.bashrc
+          grep -q MONGO_HOST ~/.bashrc || echo 'export MONGO_HOST="${{ secrets.MONGO_HOST }}"' >> ~/.bashrc
+          grep -q MONGO_PORT ~/.bashrc || echo 'export MONGO_PORT="${{ secrets.MONGO_PORT }}"' >> ~/.bashrc
+          grep -q MONGO_USERNAME ~/.bashrc || echo 'export MONGO_USERNAME="${{ secrets.MONGO_USERNAME }}"' >> ~/.bashrc
+          grep -q MONGO_PASSWORD ~/.bashrc || echo 'export MONGO_PASSWORD="${{ secrets.MONGO_PASSWORD }}"' >> ~/.bashrc
           source ~/.bashrc
 
           echo "📦 Установка зависимостей"
           poetry install --no-interaction
 
           echo "🔁 Перезапуск systemd-сервиса"
+          sudo systemctl daemon-reexec
           sudo systemctl restart tutor_bot
 
           echo "✅ Готово!"
