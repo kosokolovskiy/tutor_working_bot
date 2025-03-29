@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "tutor_bot"
+version = "0.0.1"
+description = "Production Telegram bot running on EC2"
+readme = "README.md"
+packages = [{ include = "src" }]
+authors = ["Your Name <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+pandas = "*"
+boto3 = "*"
+python-telegram-bot = "*"
+requests = "*"
+python-dotenv = "*"
+configparser = "*"
+
+kosokolovsky-telegram-bot = { git = "https://github.com/kosokolovskiy/tutor_telegram_bot.git", tag = "v0.0.1" }
+connectors = { git = "https://github.com/kosokolovskiy/connector.git", tag = "v0.0.1" }
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

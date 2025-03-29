@@ -1,0 +1,52 @@
+name: Deploy bot to EC2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up SSH key for EC2
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+    - name: Deploy files to EC2 instance
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          set -e
+
+          echo "🧹 Удаляем старую папку и создаём новую..."
+          rm -rf ~/tutor_bot
+          mkdir -p ~/tutor_bot
+        EOF
+
+        echo "📦 Копируем содержимое проекта на сервер..."
+        scp -r . ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot
+
+    - name: Install Poetry, install dependencies, run bot
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          set -e
+
+          echo "🚀 Переходим в папку проекта"
+          cd ~/tutor_bot
+
+          echo "🔧 Установка Poetry, если нужно"
+          curl -sSL https://install.python-poetry.org | python3 - || true
+          export PATH="$HOME/.local/bin:$PATH"
+
+          echo "📜 Создаём файл creds.ini из секрета"
+          echo "${{ secrets.CREDS_INI_CONTENT }}" > creds.ini
+
+          echo "📦 Установка зависимостей"
+          poetry install --no-interaction
+
+          echo "🤖 Запускаем бота в фоне"
+          nohup poetry run python src/run_bot.py > bot.log 2>&1 &

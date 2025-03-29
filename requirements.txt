@@ -1,0 +1,7 @@
+boto3
+pandas
+python-telegram-bot
+requests
+dotenv
+configparser
+argparse
