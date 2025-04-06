@@ -62,7 +62,7 @@ class DBAnalyzer:
 
     
 
-    def _compare_assigned_done(self, sql_connector, user_name, filtered_df, days_back=50):
+    def _compare_assigned_done(self, sql_connector, user_name, filtered_df, days_back=350):
         start_date = (datetime.now() - timedelta(days=days_back)).date().strftime('%Y-%m-%d')
 
         query_assigned = "SELECT * FROM assigned WHERE date > %s AND name = %s"
