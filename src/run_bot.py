@@ -30,7 +30,8 @@ username = config["MAIN"]["username"]
 password = config["MAIN"]["password"]
 rds_endpoint = config["MAIN"]["rds_endpoint"]
 
-logging.info(dbname, username, password, rds_endpoint)
+logging.info(f"{dbname}, {username}, {password}, {rds_endpoint}")
+
 
 obj = DBAnalyzer()
 
