@@ -28,7 +28,6 @@ logging.basicConfig(
 )
 
 log_dir = os.path.join(os.getcwd(), "logs")
-os.makedirs(log_dir, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,

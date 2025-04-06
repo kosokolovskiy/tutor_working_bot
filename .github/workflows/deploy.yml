@@ -40,10 +40,9 @@ jobs:
           cd ~/tutor_bot
 
           echo "📁 Создаём папку logs и даём права"
-          mkdir -p logs
-          chmod 777 logs
+          mkdir -p /home/ubuntu/tutor_bot/logs
           chmod 777 /home/ubuntu/tutor_bot/logs
-          chmod 777 /home/ubuntu/tutor_bot/logs/bot_stdout.log
+
 
           echo "🔧 Установка Poetry (если нужно)"
           curl -sSL https://install.python-poetry.org | python3 - || true
