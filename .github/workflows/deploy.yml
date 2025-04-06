@@ -45,9 +45,11 @@ jobs:
             echo '🚀 Переходим в папку проекта'
             cd ~/tutor_bot
 
-            echo '📁 Создаём папку logs и даём права'
+            echo '📁 Создаём папку logs и лог-файлы, даём права'
             mkdir -p logs
-            chmod 777 logs
+            touch logs/bot_stdout.log logs/bot_stderr.log
+            chmod 666 logs/bot_stdout.log logs/bot_stderr.log
+
 
             echo '🔧 Установка Poetry (если нужно)'
             curl -sSL https://install.python-poetry.org | python3 - || true
