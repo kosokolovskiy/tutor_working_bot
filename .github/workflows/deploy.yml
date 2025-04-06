@@ -54,8 +54,8 @@ jobs:
           echo "${{ secrets.CREDS_INI_CONTENT }}" > creds.ini
 
           echo "📦 Установка зависимостей"
-          poetry install --no-interaction
-          poetry update
+          poetry update --no-interaction
+
 
           echo "🔁 Перезапуск systemd-сервиса"
           sudo systemctl daemon-reexec
