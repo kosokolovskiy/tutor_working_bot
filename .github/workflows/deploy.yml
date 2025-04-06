@@ -3,6 +3,7 @@ name: Deploy bot to EC2
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -33,9 +34,8 @@ jobs:
 
     - name: Setup, install, and restart bot
       run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+        ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF
           set -e
-
           echo "🚀 Переходим в папку проекта"
           cd ~/tutor_bot
 
@@ -51,7 +51,7 @@ jobs:
           echo "${{ secrets.CREDS_INI_CONTENT }}" > creds.ini
 
           echo "📜 Создаём файл окружения для systemd"
-          sudo bash -c "cat > /etc/default/tutor_bot" <<EOT
+          sudo bash -c 'cat > /etc/default/tutor_bot' <<EOT
 MONGO_HOST=${{ secrets.MONGO_HOST }}
 MONGO_PORT=${{ secrets.MONGO_PORT }}
 MONGO_USERNAME=${{ secrets.MONGO_USERNAME }}
