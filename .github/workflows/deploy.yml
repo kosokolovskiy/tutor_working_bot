@@ -55,6 +55,7 @@ jobs:
 
           echo "📦 Установка зависимостей"
           poetry install --no-interaction
+          poetry update
 
           echo "🔁 Перезапуск systemd-сервиса"
           sudo systemctl daemon-reexec
