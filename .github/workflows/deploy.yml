@@ -31,7 +31,7 @@ jobs:
         echo "📦 Копируем содержимое проекта на сервер..."
         scp -r . ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot
 
-    - name: Install Poetry, inject creds, configure systemd env, restart service
+    - name: Setup, install, and restart bot
       run: |
         ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF
           set -e
@@ -39,29 +39,26 @@ jobs:
           echo "🚀 Переходим в папку проекта"
           cd ~/tutor_bot
 
-          echo "📁 Создаём папку logs и настраиваем права"
+          echo "📁 Создаём папку logs и даём права"
           mkdir -p logs
           chmod 777 logs
 
-          echo "🔧 Установка Poetry, если нужно"
+          echo "🔧 Установка Poetry (если нужно)"
           curl -sSL https://install.python-poetry.org | python3 - || true
           export PATH="\$HOME/.local/bin:\$PATH"
 
           echo "📜 Создаём creds.ini из секрета"
           echo "${{ secrets.CREDS_INI_CONTENT }}" > creds.ini
 
-          echo "🛠️ Создаём переменные окружения для systemd"
-          sudo tee /etc/default/tutor_bot > /dev/null <<EOT
-MONGO_HOST=${{ secrets.MONGO_HOST }}
-MONGO_PORT=${{ secrets.MONGO_PORT }}
-MONGO_USERNAME=${{ secrets.MONGO_USERNAME }}
-MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }}
-EOT
+          echo "📜 Создаём файл окружения для systemd"
+          echo "MONGO_HOST=${{ secrets.MONGO_HOST }}" | sudo tee /etc/default/tutor_bot > /dev/null
+          echo "MONGO_PORT=${{ secrets.MONGO_PORT }}" | sudo tee -a /etc/default/tutor_bot > /dev/null
+          echo "MONGO_USERNAME=${{ secrets.MONGO_USERNAME }}" | sudo tee -a /etc/default/tutor_bot > /dev/null
+          echo "MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }}" | sudo tee -a /etc/default/tutor_bot > /dev/null
+          sudo chmod 644 /etc/default/tutor_bot
 
           echo "📦 Удаляем poetry.lock и обновляем git-зависимости"
           rm -f poetry.lock
-
-          echo "🔄 Принудительно обновляем git-зависимости"
           poetry update kosokolovsky-telegram-bot connectors --no-interaction
 
           echo "📦 Установка зависимостей"
