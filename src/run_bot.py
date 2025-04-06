@@ -27,17 +27,6 @@ logging.basicConfig(
     ]
 )
 
-log_dir = os.path.join(os.getcwd(), "logs")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(asctime)s] %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(log_dir, "bot_stdout.log")),
-        logging.StreamHandler()
-    ]
-)
-
 
 USERS, TOKEN, API_URL = get_creds()
 
@@ -77,19 +66,20 @@ obj = DBAnalyzer()
 
 async def periodic_update_loop(app, interval, USERS):
     while True:
-        print("Running periodic DB update...")
+        logging.info("Running periodic DB update...")
         try:
             for student_name in USERS.keys():
                 logging.info(student_name)
                 nums = doneOrNot(student_name=student_name)
-                logging.info(nums)
+                logging.info(f"Missing tasks: {nums}")
                 formatted_message = format_missing_tasks_markdown(nums)
                 chat_id = USERS[student_name]
                 logging.info(f"Updating bot_data[{chat_id}] = {formatted_message}")
                 app.bot_data[f"custom_message_{chat_id}"] = formatted_message
         except Exception as e:
-            print(f'ERROR during periodic update: {e}')
+            logging.exception(f'ERROR during periodic update: {e}')
         await asyncio.sleep(interval)
+
 
 
 def start_bot():
