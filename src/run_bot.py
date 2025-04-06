@@ -12,12 +12,16 @@ import configparser
 # nest_asyncio.apply()
 
 import logging
+import os
+
+log_dir = os.path.join(os.getcwd(), "logs")
+os.makedirs(log_dir, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("bot_stdout.log"),
+        logging.FileHandler(os.path.join(log_dir, "bot_stdout.log")),
         logging.StreamHandler()
     ]
 )
