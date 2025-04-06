@@ -39,6 +39,7 @@ logging.basicConfig(
     ]
 )
 
+logging.info(f"{dbname}, {username}, {password}, {rds_endpoint}")
 
 USERS, TOKEN, API_URL = get_creds()
 
