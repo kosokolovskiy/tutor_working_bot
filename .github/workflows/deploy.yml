@@ -31,7 +31,7 @@ jobs:
         echo "📦 Копируем содержимое проекта на сервер..."
         scp -r . ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot
 
-    - name: Install Poetry, inject creds, set env, restart systemd
+    - name: Install Poetry, inject creds, configure systemd env, restart service
       run: |
         ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF
           set -e
@@ -39,33 +39,37 @@ jobs:
           echo "🚀 Переходим в папку проекта"
           cd ~/tutor_bot
 
+          echo "📁 Создаём папку logs и настраиваем права"
+          mkdir -p logs
+          chmod 777 logs
+
           echo "🔧 Установка Poetry, если нужно"
           curl -sSL https://install.python-poetry.org | python3 - || true
           export PATH="\$HOME/.local/bin:\$PATH"
 
-          echo "📜 Установка переменных окружения (MongoDB)"
-          grep -q MONGO_HOST ~/.bashrc || echo 'export MONGO_HOST="${{ secrets.MONGO_HOST }}"' >> ~/.bashrc
-          grep -q MONGO_PORT ~/.bashrc || echo 'export MONGO_PORT="${{ secrets.MONGO_PORT }}"' >> ~/.bashrc
-          grep -q MONGO_USERNAME ~/.bashrc || echo 'export MONGO_USERNAME="${{ secrets.MONGO_USERNAME }}"' >> ~/.bashrc
-          grep -q MONGO_PASSWORD ~/.bashrc || echo 'export MONGO_PASSWORD="${{ secrets.MONGO_PASSWORD }}"' >> ~/.bashrc
-          source ~/.bashrc
-
           echo "📜 Создаём creds.ini из секрета"
           echo "${{ secrets.CREDS_INI_CONTENT }}" > creds.ini
 
+          echo "🛠️ Создаём переменные окружения для systemd"
+          sudo tee /etc/default/tutor_bot > /dev/null <<EOT
+MONGO_HOST=${{ secrets.MONGO_HOST }}
+MONGO_PORT=${{ secrets.MONGO_PORT }}
+MONGO_USERNAME=${{ secrets.MONGO_USERNAME }}
+MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }}
+EOT
+
           echo "📦 Удаляем poetry.lock и обновляем git-зависимости"
           rm -f poetry.lock
-          
+
           echo "🔄 Принудительно обновляем git-зависимости"
           poetry update kosokolovsky-telegram-bot connectors --no-interaction
-          
+
           echo "📦 Установка зависимостей"
           poetry install --no-interaction
 
-
-
           echo "🔁 Перезапуск systemd-сервиса"
           sudo systemctl daemon-reexec
+          sudo systemctl daemon-reload
           sudo systemctl restart tutor_bot
 
           echo "✅ Деплой завершён!"
