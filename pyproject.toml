@@ -16,7 +16,7 @@ python-dotenv = "*"
 configparser = "*"
 
 kosokolovsky-telegram-bot = { git = "https://github.com/kosokolovskiy/tutor_telegram_bot.git", tag = "v0.0.1" }
-connectors = { git = "https://github.com/kosokolovskiy/connector.git", tag = "v0.0.1" }
+connectors = { git = "https://github.com/kosokolovskiy/connectors.git", tag = "v0.0.1" }
 
 [build-system]
 requires = ["poetry-core"]
