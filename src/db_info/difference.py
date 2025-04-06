@@ -2,13 +2,16 @@ import pandas as pd
 from connectors.mongodb import MongoConnector
 from connectors.mysql import SQLConnector
 import configparser
+import os
 
 import json
 from datetime import date
 from datetime import datetime, timedelta
 
+creds_path = os.path.join(os.path.dirname(__file__), "../../creds.ini")
+
 config = configparser.ConfigParser()
-config.read("creds.ini")
+config.read(creds_path)
 
 
 dbname = config["MAIN"]["dbname"]

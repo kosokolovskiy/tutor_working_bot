@@ -4,12 +4,18 @@ from kosokolovsky_telegram_bot import MyBot
 import argparse
 import requests
 from db_info.difference import DBAnalyzer
+import os
 
 from connectors.mysql import SQLConnector
 
 
+
+creds_path = os.path.join(os.path.dirname(__file__), "../creds.ini")
+
 config = configparser.ConfigParser()
-config.read("config.ini") 
+config.read(creds_path)
+
+
 dbname = config["MAIN"]["dbname"]
 username = config["MAIN"]["username"]
 password = config["MAIN"]["password"]
