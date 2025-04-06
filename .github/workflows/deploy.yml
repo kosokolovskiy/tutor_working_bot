@@ -54,7 +54,9 @@ jobs:
           echo "${{ secrets.CREDS_INI_CONTENT }}" > creds.ini
 
           echo "📦 Установка зависимостей"
-          poetry update --no-interaction
+          rm -f poetry.lock
+          poetry lock --no-interaction
+          poetry install --no-interaction
 
 
           echo "🔁 Перезапуск systemd-сервиса"
