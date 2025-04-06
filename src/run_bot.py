@@ -39,7 +39,6 @@ logging.basicConfig(
     ]
 )
 
-logging.info(f"{dbname}, {username}, {password}, {rds_endpoint}")
 
 USERS, TOKEN, API_URL = get_creds()
 
@@ -51,6 +50,9 @@ dbname = config["MAIN"]["dbname"]
 username = config["MAIN"]["username"]
 password = config["MAIN"]["password"]
 rds_endpoint = config["MAIN"]["rds_endpoint"]
+
+logging.info(f"{dbname}, {username}, {password}, {rds_endpoint}")
+
 
 app = MyBot.run_bot(TOKEN)
 
