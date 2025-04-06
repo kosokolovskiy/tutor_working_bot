@@ -11,6 +11,17 @@ import configparser
 # import nest_asyncio
 # nest_asyncio.apply()
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("bot_stdout.log"),
+        logging.StreamHandler()
+    ]
+)
+
 
 USERS, TOKEN, API_URL = get_creds()
 
@@ -53,6 +64,7 @@ async def periodic_update_loop(app, interval, USERS):
                 nums = doneOrNot(student_name=student_name)
                 formatted_message = format_missing_tasks_markdown(nums)
                 chat_id = USERS[student_name]
+                logging.info(f"Updating bot_data[{chat_id}] = {formatted_message}")
                 app.bot_data[f"custom_message_{chat_id}"] = formatted_message
         except Exception as e:
             print(f'ERROR during periodic update: {e}')
