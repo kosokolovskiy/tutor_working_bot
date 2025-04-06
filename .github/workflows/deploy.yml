@@ -33,16 +33,15 @@ jobs:
 
     - name: Setup, install, and restart bot
       run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF
+        ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
           set -e
 
           echo "🚀 Переходим в папку проекта"
           cd ~/tutor_bot
 
           echo "📁 Создаём папку logs и даём права"
-          mkdir -p /home/ubuntu/tutor_bot/logs
-          chmod 777 /home/ubuntu/tutor_bot/logs
-
+          mkdir -p logs
+          chmod 777 logs
 
           echo "🔧 Установка Poetry (если нужно)"
           curl -sSL https://install.python-poetry.org | python3 - || true
@@ -52,10 +51,13 @@ jobs:
           echo "${{ secrets.CREDS_INI_CONTENT }}" > creds.ini
 
           echo "📜 Создаём файл окружения для systemd"
-          echo "MONGO_HOST=${{ secrets.MONGO_HOST }}" | sudo tee /etc/default/tutor_bot > /dev/null
-          echo "MONGO_PORT=${{ secrets.MONGO_PORT }}" | sudo tee -a /etc/default/tutor_bot > /dev/null
-          echo "MONGO_USERNAME=${{ secrets.MONGO_USERNAME }}" | sudo tee -a /etc/default/tutor_bot > /dev/null
-          echo "MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }}" | sudo tee -a /etc/default/tutor_bot > /dev/null
+          sudo bash -c "cat > /etc/default/tutor_bot" <<EOT
+MONGO_HOST=${{ secrets.MONGO_HOST }}
+MONGO_PORT=${{ secrets.MONGO_PORT }}
+MONGO_USERNAME=${{ secrets.MONGO_USERNAME }}
+MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }}
+EOT
+
           sudo chmod 644 /etc/default/tutor_bot
 
           echo "📦 Удаляем poetry.lock и обновляем git-зависимости"
