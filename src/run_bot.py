@@ -30,6 +30,8 @@ username = config["MAIN"]["username"]
 password = config["MAIN"]["password"]
 rds_endpoint = config["MAIN"]["rds_endpoint"]
 
+logging.info(dbname, username, password, rds_endpoint)
+
 obj = DBAnalyzer()
 
 
@@ -54,11 +56,11 @@ async def periodic_update_loop(app, interval, USERS):
         logging.info("Running periodic DB update...")
         try:
             for student_name in USERS.keys():
-                logging(student_name)
+                logging.info(student_name)
                 nums = doneOrNot(student_name=student_name)
                 formatted_message = format_missing_tasks_markdown(nums)
                 chat_id = USERS[student_name]
-                # logging.info(f"Updating bot_data[{chat_id}] = {formatted_message}")
+                logging.info(f"Updating bot_data[{chat_id}] = {formatted_message}")
                 app.bot_data[f"custom_message_{chat_id}"] = formatted_message
         except Exception as e:
             logging.exception(f'ERROR during periodic update: {e}')
