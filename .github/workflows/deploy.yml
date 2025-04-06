@@ -53,10 +53,15 @@ jobs:
           echo "📜 Создаём creds.ini из секрета"
           echo "${{ secrets.CREDS_INI_CONTENT }}" > creds.ini
 
-          echo "📦 Установка зависимостей"
+          echo "📦 Удаляем poetry.lock и обновляем git-зависимости"
           rm -f poetry.lock
-          poetry lock --no-interaction
+          
+          echo "🔄 Принудительно обновляем git-зависимости"
+          poetry update kosokolovsky-telegram-bot connectors --no-interaction
+          
+          echo "📦 Установка зависимостей"
           poetry install --no-interaction
+
 
 
           echo "🔁 Перезапуск systemd-сервиса"
