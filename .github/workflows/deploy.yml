@@ -57,10 +57,10 @@ jobs:
             echo \"$CREDS_INI_CONTENT\" > creds.ini
 
             echo '📜 Создаём файл окружения для systemd'
-            echo \"MONGO_HOST=$MONGO_HOST\" | sudo tee /etc/default/tutor_bot > /dev/null
-            echo \"MONGO_PORT=$MONGO_PORT\" | sudo tee -a /etc/default/tutor_bot > /dev/null
-            echo \"MONGO_USERNAME=$MONGO_USERNAME\" | sudo tee -a /etc/default/tutor_bot > /dev/null
-            echo \"MONGO_PASSWORD=$MONGO_PASSWORD\" | sudo tee -a /etc/default/tutor_bot > /dev/null
+            echo \"export MONGO_HOST=$MONGO_HOST\" | sudo tee /etc/default/tutor_bot > /dev/null
+            echo \"export MONGO_PORT=$MONGO_PORT\" | sudo tee -a /etc/default/tutor_bot > /dev/null
+            echo \"export MONGO_USERNAME=$MONGO_USERNAME\" | sudo tee -a /etc/default/tutor_bot > /dev/null
+            echo \"export MONGO_PASSWORD=$MONGO_PASSWORD\" | sudo tee -a /etc/default/tutor_bot > /dev/null
 
             sudo chmod 644 /etc/default/tutor_bot
 
