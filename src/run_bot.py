@@ -170,37 +170,98 @@ async def watch_answers(application) -> None:
             await asyncio.sleep(5)
 
 # ----------------- COMMANDS -----------------
-async def on_progress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def _normalize_name(s: str) -> str:
+    return s.strip().lower().replace("@", "")
+
+def _name_to_chat_id(student_name: str) -> Optional[int]:
+    # USERS: {name -> chat_id}
+    return USERS.get(student_name)
+
+async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Reply with student's progress from cache; if cache is empty (e.g., after restart),
-    compute on-the-fly and populate the cache before replying.
+    /todo, /progress, /status, /check
+    - non-admin: always returns their own missing HW (args ignored)
+    - admin:
+        * with arg: returns that student's missing HW
+        * without arg: returns their own
     """
-    chat_id = update.effective_chat.id if update.effective_chat else None
-    if chat_id is None:
+    if not update.effective_chat:
         return
 
-    student_name = chat_id_to_student(chat_id)
-    if not student_name:
-        await context.bot.send_message(chat_id, "⛔️ You don't have access to this bot.")
-        return
-
-    # 1) Try cached preformatted message
-    cached_msg = context.application.bot_data.get(PROGRESS_MSG_KEY.format(chat_id=chat_id))
-    if cached_msg:
-        await context.bot.send_message(chat_id, cached_msg, parse_mode="Markdown")
-        return
-
-    # 2) No cache → compute quickly and cache
+    requester_chat_id = update.effective_chat.id
+    is_admin = False
     try:
-        await recompute_student(context.application, student_name)
-        cached_msg = context.application.bot_data.get(PROGRESS_MSG_KEY.format(chat_id=chat_id))
-        if not cached_msg:
-            cached_nums = context.application.bot_data.get(PROGRESS_KEY.format(student=student_name), {})
-            cached_msg = format_missing_tasks_markdown(cached_nums)
-        await context.bot.send_message(chat_id, cached_msg, parse_mode="Markdown")
-    except Exception:
-        logging.exception("on_progress failed for %s", student_name)
-        await context.bot.send_message(chat_id, "⚠️ Failed to get progress. Please try again later.")
+        is_admin = (requester_chat_id == MyBot.get_admin_id())
+    except Exception as e:
+        logging.warning("get_admin_id failed: %s", e)
+
+    target_chat_id: Optional[int] = None
+    target_student_name: Optional[str] = None
+
+    if is_admin and context.args:
+        # admin requested a specific student
+        arg_name = _normalize_name(context.args[0])
+        cid = _name_to_chat_id(arg_name)
+        if cid is None:
+            await context.bot.send_message(
+                requester_chat_id,
+                "User not found"
+            )
+            return
+        target_chat_id = cid
+        target_student_name = arg_name
+    else:
+        # non-admin OR admin without args -> self
+        target_chat_id = requester_chat_id
+        target_student_name = chat_id_to_student(requester_chat_id)
+        if not target_student_name:
+            await context.bot.send_message(
+                requester_chat_id,
+                "⛔️ You don't have access to this bot."
+            )
+            return
+
+    # Try cached, otherwise recompute and cache
+    cache_key = PROGRESS_MSG_KEY.format(chat_id=target_chat_id)
+    cached_msg = context.application.bot_data.get(cache_key)
+    if not cached_msg:
+        try:
+            await recompute_student(context.application, target_student_name)
+            cached_msg = context.application.bot_data.get(cache_key)
+            if not cached_msg:
+                # Fallback: build from raw dict if present
+                raw = context.application.bot_data.get(
+                    PROGRESS_KEY.format(student=target_student_name), {}
+                )
+                cached_msg = format_missing_tasks_markdown(raw)
+        except Exception:
+            logging.exception("on_status failed for %s", target_student_name)
+            await context.bot.send_message(
+                requester_chat_id,
+                "⚠️ Failed to get progress. Please try again later."
+            )
+            return
+
+    # Reply to the requester (admin or regular user)
+    await context.bot.send_message(
+        requester_chat_id,
+        cached_msg,
+        parse_mode="Markdown"  # наш форматтер делает Markdown, не V2
+    )
+
+# ----------------- PTB APP INIT -----------------
+async def _post_init(app):
+    # Register commands:
+    # /todo, /progress, /status, /check — все ведут на один и тот же хэндлер
+    app.add_handler(CommandHandler(["todo", "progress", "status", "check"], on_status))
+
+    # Prewarm cache for all known students (background)
+    for student in USERS.keys():
+        app.create_task(recompute_student(app, student))
+
+    # Start Mongo watcher (background) — чтобы кэш был свежим без задержки
+    app.create_task(watch_answers(app))
+
 
 # ----------------- PTB APP INIT -----------------
 async def _post_init(app):
