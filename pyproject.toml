@@ -15,6 +15,7 @@ requests = "*"
 python-dotenv = "*"
 configparser = "*"
 
+kosokolovsky-telegram-bot = { git = "https://github.com/kosokolovskiy/tutor_telegram_bot.git", rev = "dev" }
 connectors = { git = "https://github.com/kosokolovskiy/connectors.git", rev = "main" }
 
 [build-system]

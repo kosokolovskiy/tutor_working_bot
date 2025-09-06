@@ -1,4 +1,4 @@
-name: Deploy bot to EC2 (prod)
+name: Deploy bot to EC2
 
 on:
   push:
@@ -8,8 +8,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      PACKAGE_VERSION: "0.0.1"   # <<< ПИН ПРОД-ВЕРСИИ
 
     steps:
       - name: Checkout repository
@@ -24,12 +22,14 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
+            echo "🧹 Удаляем старую папку и создаём новую..."
             rm -rf ~/tutor_bot
             mkdir -p ~/tutor_bot
           EOF
 
       - name: Upload project to EC2
         run: |
+          echo "📦 Копируем содержимое проекта на сервер..."
           scp -r . ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot
 
       - name: Setup, install, and restart bot
@@ -39,42 +39,44 @@ jobs:
           MONGO_USERNAME: ${{ secrets.MONGO_USERNAME }}
           MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
           CREDS_INI_CONTENT: ${{ secrets.CREDS_INI_CONTENT }}
-          PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "
             set -e
+            echo '🚀 Переходим в папку проекта'
             cd ~/tutor_bot
 
-            echo '📁 Create logs folder and log files + rights'
+            echo '📁 Создаём папку logs и лог-файлы, даём права'
             mkdir -p logs
             touch logs/bot_stdout.log logs/bot_stderr.log
             chmod 666 logs/bot_stdout.log logs/bot_stderr.log
 
-            echo '🔧 Setting up Poetry'
+
+            echo '🔧 Установка Poetry (если нужно)'
             curl -sSL https://install.python-poetry.org | python3 - || true
             export PATH=\"\$HOME/.local/bin:\$PATH\"
 
-            echo '📜 create creds.ini from secret'
+            echo '📜 Создаём creds.ini из секрета'
             echo \"$CREDS_INI_CONTENT\" > creds.ini
 
-            echo '📜 Create /etc/default/tutor_bot env file'
+            echo '📜 Создаём файл окружения для systemd'
             echo \"export MONGO_HOST=$MONGO_HOST\" | sudo tee /etc/default/tutor_bot > /dev/null
             echo \"export MONGO_PORT=$MONGO_PORT\" | sudo tee -a /etc/default/tutor_bot > /dev/null
             echo \"export MONGO_USERNAME=$MONGO_USERNAME\" | sudo tee -a /etc/default/tutor_bot > /dev/null
             echo \"export MONGO_PASSWORD=$MONGO_PASSWORD\" | sudo tee -a /etc/default/tutor_bot > /dev/null
+
             sudo chmod 644 /etc/default/tutor_bot
 
-            echo '📦 Pin kosokolovsky-telegram-bot to exact version and install deps'
+            echo '📦 Удаляем poetry.lock и обновляем git-зависимости'
             rm -f poetry.lock
-            poetry remove kosokolovsky-telegram-bot || true
-            poetry add kosokolovsky_telegram_bot\ @\ git+https://github.com/kosokolovskiy/tutor_telegram_bot.git@${PACKAGE_VERSION} --no-interaction
+            poetry update kosokolovsky-telegram-bot connectors --no-interaction
 
+            echo '📦 Установка зависимостей'
             poetry install --no-interaction
 
-            echo '🔁 Restart systemd service'
+            echo '🔁 Перезапуск systemd-сервиса'
             sudo systemctl daemon-reexec
             sudo systemctl daemon-reload
             sudo systemctl restart tutor_bot
 
-            echo '✅ Deployment is finished!'
+            echo '✅ Деплой завершён!'
           "

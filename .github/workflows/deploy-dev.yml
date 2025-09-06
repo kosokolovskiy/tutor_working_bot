@@ -1,4 +1,4 @@
-name: Deploy bot to EC2 (dev)
+name: Deploy bot to EC2
 
 on:
   push:
@@ -8,8 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      PACKAGE_VERSION: "0.0.2"
+    environment: students_new   # <-- ВСЁ берётся из окружения students_new
 
     steps:
       - name: Checkout repository
@@ -22,61 +21,56 @@ jobs:
 
       - name: Clean and prepare remote folder
         run: |
-          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" <<'SSH'
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" << 'SSH'
             set -e
+            echo "🧹 Removing old folder and creating a new one..."
             rm -rf ~/tutor_bot
             mkdir -p ~/tutor_bot
           SSH
 
       - name: Upload project to EC2
         run: |
+          echo "📦 Uploading project to server..."
           scp -o StrictHostKeyChecking=no -r . "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot"
 
       - name: Setup, install, and restart bot
         env:
           CREDS_INI_CONTENT: ${{ secrets.CREDS_INI_CONTENT }}
-          MONGO_URI: ${{ secrets.MONGO_URI }}      # задавай сразу URI (реплика-сет)
-          PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
+          MONGO_URI:         ${{ secrets.MONGO_URI }}   # <-- один секрет с готовым URI
         run: |
-          # Передаём PACKAGE_VERSION внутрь удалённой сессии явным экспортом
-          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "export PACKAGE_VERSION='${PACKAGE_VERSION}'; bash -s" <<'SSH'
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "bash -s" << 'SSH'
             set -e
+            echo '🚀 cd to project'
             cd ~/tutor_bot
 
-            echo '📁 Create logs folder and log files + rights'
-            mkdir -p logs && touch logs/bot_stdout.log logs/bot_stderr.log && chmod 666 logs/*.log
+            echo '📁 ensure logs exist'
+            mkdir -p logs
+            : > logs/bot_stdout.log
+            : > logs/bot_stderr.log
+            chmod 666 logs/bot_stdout.log logs/bot_stderr.log
 
-            echo '🔧 Setting up Poetry'
+            echo '🔧 install Poetry if needed'
             curl -sSL https://install.python-poetry.org | python3 - || true
             export PATH="$HOME/.local/bin:$PATH"
 
-            echo '📜 create creds.ini from secret'
-            # используем printf, чтобы сохранить переводы строк
+            echo '📜 write creds.ini from secret'
             printf '%s' "$CREDS_INI_CONTENT" > creds.ini
 
-            echo '📜 Create /etc/default/tutor_bot env file'
-            # твой код читает именно MONGO_URI
+            echo '🌍 write systemd env file'
             echo "export MONGO_URI=$MONGO_URI" | sudo tee /etc/default/tutor_bot > /dev/null
             sudo chmod 644 /etc/default/tutor_bot
 
-            echo '📦 Pin kosokolovsky_telegram_bot from Git tag and install deps'
-            # git почти наверняка уже есть; если нет — ставить можно отдельно
+            echo '📦 install deps with Poetry'
             rm -f poetry.lock
-            poetry remove kosokolovsky-telegram-bot || true
-            poetry remove kosokolovsky_telegram_bot || true
             poetry config virtualenvs.in-project true
-            rm -rf .venv || true
-
-            # Сформируем ОДИН цельный PEP-508 аргумент для Poetry 2.x
-            REQ="kosokolovsky_telegram_bot @ git+https://github.com/kosokolovskiy/tutor_telegram_bot.git@${PACKAGE_VERSION}"
-            poetry add "$REQ" --no-interaction
-
+            # если меняли зависимости/источники ранее:
+            # poetry cache clear pypi --all -n || true
             poetry install --no-interaction
 
-            echo '🔁 Restart systemd service'
+            echo '🔁 restart systemd service'
             sudo systemctl daemon-reexec
             sudo systemctl daemon-reload
             sudo systemctl restart tutor_bot
 
-            echo '✅ Deployment is finished!'
+            echo '✅ deploy finished'
           SSH
