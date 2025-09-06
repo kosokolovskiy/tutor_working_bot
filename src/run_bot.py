@@ -44,8 +44,7 @@ rds_endpoint = config["MAIN"]["rds_endpoint"]
 # ----------------- MONGO -----------------
 # Configure MongoDB connection (replica set is required for change streams)
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017/?replicaSet=rs0")
-DB_NAME = os.getenv("MONGO_DB", "log_db")
-ANSWERS_COLL = os.getenv("MONGO_COLL", "logs")
+DB_NAME = os.getenv("MONGO_DB", "inf_answers")
 
 # Persist resume token to avoid missing events across restarts
 RESUME_FILE = os.path.join(os.path.dirname(__file__), "cache", "mongo_resume_token.bson")
@@ -118,17 +117,27 @@ async def recompute_student(application, student_name: str) -> None:
         logging.exception("Failed to recompute for %s", student_name)
 
 # ----------------- MONGO WATCHER -----------------
+
+def _student_from_doc(doc: dict) -> Optional[str]:
+    """Try common field names used in your documents."""
+    # Your data uses 'USER' (upper-case) in difference.py, so check that first
+    for k in ("USER", "username", "user", "student", "name"):
+        v = doc.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip().lower()
+    return None
+
 async def watch_answers(application) -> None:
     """
-    Listen to MongoDB change streams on the answers collection.
-    On insert/update/replace → recompute cache for the affected student.
+    Watch the whole database so we catch inserts/updates across collections '2'..'27'.
     """
     client = AsyncIOMotorClient(MONGO_URI)
-    coll = client[DB_NAME][ANSWERS_COLL]
+    db = client[DB_NAME]
 
     pipeline = [
-        {"$match": {"operationType": {"$in": ["insert", "update", "replace"]}}}
-        # If needed, add more filters here
+        {"$match": {"operationType": {"$in": ["insert", "update", "replace"]}}},
+        # You already want fresh docs when updated:
+        # fullDocument="updateLookup" is set below in the call
     ]
 
     resume_token = _load_resume_token()
@@ -139,22 +148,23 @@ async def watch_answers(application) -> None:
             if resume_token:
                 kwargs["resume_after"] = resume_token
 
-            async with coll.watch(**kwargs) as stream:
-                logging.info("Mongo change stream started")
+            # ⬇️ database-level change stream (not a single collection)
+            async with db.watch(**kwargs) as stream:
+                logging.info("Mongo DB change stream started on %s", DB_NAME)
                 async for change in stream:
-                    # Save token early to be resilient to restarts
+                    # persist resume token
                     token = change.get("_id")
                     if token:
                         resume_token = token
                         _save_resume_token(token)
 
                     doc = change.get("fullDocument") or {}
-                    # IMPORTANT: adjust the key if your schema uses another field than "username"
-                    student_name = doc.get("username")
+                    student_name = _student_from_doc(doc)
                     if not student_name:
+                        # nothing to recompute if we can't identify the student
                         continue
 
-                    # Debounce recompute for this student
+                    # debounce
                     now = asyncio.get_running_loop().time()
                     last = _debounce.get(student_name, 0.0)
                     if now - last < DEBOUNCE_SECONDS:
