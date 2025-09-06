@@ -8,7 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: students_new   # берём секреты/переменные из этого Environment
+    environment: students_new
 
     steps:
       - name: Checkout repository
@@ -37,6 +37,10 @@ jobs:
         env:
           CREDS_INI_CONTENT: ${{ secrets.CREDS_INI_CONTENT }}
           MONGO_URI:         ${{ secrets.MONGO_URI }}
+          MONGO_HOST:        ${{ secrets.MONGO_HOST }}
+          MONGO_PORT:        ${{ secrets.MONGO_PORT }}
+          MONGO_USERNAME:    ${{ secrets.MONGO_USERNAME }}
+          MONGO_PASSWORD:    ${{ secrets.MONGO_PASSWORD }}
         run: |
           ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "
             set -e
@@ -51,8 +55,6 @@ jobs:
 
             echo '🔧 install Poetry (idempotent)'
             curl -sSL https://install.python-poetry.org | python3 - || true
-
-            # robust poetry path detection
             export PATH=\"\$HOME/.local/bin:\$HOME/.poetry/bin:\$PATH\"
             if command -v poetry >/dev/null 2>&1; then
               POETRY=\$(command -v poetry)
@@ -69,8 +71,12 @@ jobs:
             printf '%s' \"$CREDS_INI_CONTENT\" > creds.ini
 
             echo '🌍 write /etc/default/tutor_bot'
-            # systemd EnvironmentFile — просто KEY=VALUE (без export)
-            echo \"MONGO_URI=$MONGO_URI\" | sudo tee /etc/default/tutor_bot > /dev/null
+            # просто KEY=VALUE; дозаписываем все из скрина
+            echo \"MONGO_URI=$MONGO_URI\"       | sudo tee  /etc/default/tutor_bot > /dev/null
+            echo \"MONGO_HOST=$MONGO_HOST\"     | sudo tee -a /etc/default/tutor_bot > /dev/null
+            echo \"MONGO_PORT=$MONGO_PORT\"     | sudo tee -a /etc/default/tutor_bot > /dev/null
+            echo \"MONGO_USERNAME=$MONGO_USERNAME\" | sudo tee -a /etc/default/tutor_bot > /dev/null
+            echo \"MONGO_PASSWORD=$MONGO_PASSWORD\" | sudo tee -a /etc/default/tutor_bot > /dev/null
             sudo chmod 644 /etc/default/tutor_bot
 
             echo '📦 install deps'
@@ -81,7 +87,6 @@ jobs:
             echo '🔁 systemd reload & (re)start'
             sudo systemctl daemon-reexec || true
             sudo systemctl daemon-reload || true
-            # если юнит уже есть — рестарт; если нет — старт
             sudo systemctl restart tutor_bot || sudo systemctl start tutor_bot
 
             echo '✅ deploy finished'
