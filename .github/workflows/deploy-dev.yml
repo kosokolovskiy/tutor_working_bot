@@ -8,7 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: students_new
+    environment: students_new   # все secrets/vars берём из этого Environment
 
     steps:
       - name: Checkout repository
@@ -23,57 +23,53 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" << 'SSH'
             set -e
-            echo "🧹 Removing old folder and creating a new one..."
+            echo "🧹 Удаляем старую папку и создаём новую..."
             rm -rf ~/tutor_bot
             mkdir -p ~/tutor_bot
           SSH
 
       - name: Upload project to EC2
         run: |
-          echo "📦 Uploading project to server..."
+          echo "📦 Копируем содержимое проекта на сервер..."
           scp -o StrictHostKeyChecking=no -r . "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot"
 
       - name: Setup, install, and restart bot
         env:
           CREDS_INI_CONTENT: ${{ secrets.CREDS_INI_CONTENT }}
-          MONGO_URI:         ${{ secrets.MONGO_URI }}   # <-- один секрет с готовым URI
+          # РЕКОМЕНДУЕТСЯ: один секрет с готовым URI
+          MONGO_URI:         ${{ secrets.MONGO_URI }}
         run: |
           ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "bash -s" << 'SSH'
             set -e
-            echo '🚀 cd to project'
+            echo '🚀 Переходим в папку проекта'
             cd ~/tutor_bot
 
-            echo '📁 ensure logs exist'
+            echo '📁 Создаём папку logs и лог-файлы, даём права'
             mkdir -p logs
             : > logs/bot_stdout.log
             : > logs/bot_stderr.log
             chmod 666 logs/bot_stdout.log logs/bot_stderr.log
 
-            echo '🔧 install Poetry if needed'
+            echo '🔧 Установка Poetry (если нужно)'
             curl -sSL https://install.python-poetry.org | python3 - || true
             export PATH="$HOME/.local/bin:$PATH"
 
-            echo '📜 write creds.ini from secret'
+            echo '📜 Создаём creds.ini из секрета'
             printf '%s' "$CREDS_INI_CONTENT" > creds.ini
 
-            echo '🌍 write systemd env file'
-            echo "export MONGO_URI=$MONGO_URI" | sudo tee /etc/default/tutor_bot > /dev/null
+            echo '🌍 Создаём /etc/default/tutor_bot'
+            # systemd EnvironmentFile — без "export"
+            echo "MONGO_URI=$MONGO_URI" | sudo tee /etc/default/tutor_bot > /dev/null
             sudo chmod 644 /etc/default/tutor_bot
 
-            echo '📦 install deps with Poetry'
+            echo '📦 Удаляем poetry.lock и обновляем зависимости'
             rm -f poetry.lock
-            poetry config virtualenvs.in-project true
-            # если меняли зависимости/источники ранее:
-            # poetry cache clear pypi --all -n || true
             poetry install --no-interaction
 
-
-            
-
-            echo '🔁 restart systemd service'
+            echo '🔁 Перезапуск systemd-сервиса'
             sudo systemctl daemon-reexec
             sudo systemctl daemon-reload
             sudo systemctl restart tutor_bot
 
-            echo '✅ deploy finished'
+            echo '✅ Деплой завершён!'
           SSH
