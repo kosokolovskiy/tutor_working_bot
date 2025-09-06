@@ -4,6 +4,7 @@ from kosokolovsky_telegram_bot import MyBot
 
 def get_creds():
     creds_path = os.path.join(os.path.dirname(__file__), "../creds.ini")
+    creds_path = "/home/ubuntu/tutor_bot/creds.ini"
 
     config = ConfigParser()
     config.read(creds_path)
