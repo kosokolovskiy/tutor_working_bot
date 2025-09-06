@@ -262,17 +262,6 @@ async def _post_init(app):
     # Start Mongo watcher (background) — чтобы кэш был свежим без задержки
     app.create_task(watch_answers(app))
 
-
-# ----------------- PTB APP INIT -----------------
-async def _post_init(app):
-    # Register commands (aliases)
-    app.add_handler(CommandHandler(["todo", "progress", "status"], on_progress))
-    # Prewarm cache for all known students (runs in background)
-    for student in USERS.keys():
-        app.create_task(recompute_student(app, student))
-    # Start Mongo watcher in background
-    app.create_task(watch_answers(app))
-
 if __name__ == '__main__':
     app = MyBot.run_bot(TOKEN)
     app.post_init = _post_init
