@@ -9,7 +9,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      PACKAGE_VERSION: "0.0.2" 
+      PACKAGE_VERSION: "0.0.2"
 
     steps:
       - name: Checkout repository
@@ -65,9 +65,14 @@ jobs:
             sudo chmod 644 /etc/default/tutor_bot
 
             echo '📦 Pin kosokolovsky-telegram-bot to exact version and install deps'
+            sudo apt-get update -y && sudo apt-get install -y git
             rm -f poetry.lock
             poetry remove kosokolovsky-telegram-bot || true
-            poetry add kosokolovsky_telegram_bot\ @\ git+https://github.com/kosokolovskiy/tutor_telegram_bot.git@${PACKAGE_VERSION} --no-interaction
+            poetry remove kosokolovsky_telegram_bot || true
+
+            # -- ВАЖНО: один цельный аргумент для Poetry 2.x (PEP 508 direct URL) --
+            REQ='kosokolovsky_telegram_bot @ git+https://github.com/kosokolovskiy/tutor_telegram_bot.git@'${PACKAGE_VERSION}
+            poetry add \"$REQ\" --no-interaction
 
             poetry install --no-interaction
 
