@@ -21,12 +21,12 @@ jobs:
 
       - name: Clean and prepare remote folder
         run: |
-          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" << 'SSH'
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "
             set -e
-            echo "🧹 Удаляем старую папку и создаём новую..."
+            echo '🧹 Удаляем старую папку и создаём новую...'
             rm -rf ~/tutor_bot
             mkdir -p ~/tutor_bot
-          SSH
+          "
 
       - name: Upload project to EC2
         run: |
@@ -36,10 +36,9 @@ jobs:
       - name: Setup, install, and restart bot
         env:
           CREDS_INI_CONTENT: ${{ secrets.CREDS_INI_CONTENT }}
-          # РЕКОМЕНДУЕТСЯ: один секрет с готовым URI
           MONGO_URI:         ${{ secrets.MONGO_URI }}
         run: |
-          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "bash -s" << 'SSH'
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "
             set -e
             echo '🚀 Переходим в папку проекта'
             cd ~/tutor_bot
@@ -52,24 +51,24 @@ jobs:
 
             echo '🔧 Установка Poetry (если нужно)'
             curl -sSL https://install.python-poetry.org | python3 - || true
-            export PATH="$HOME/.local/bin:$PATH"
+            export PATH=\"$HOME/.local/bin:$PATH\"
 
             echo '📜 Создаём creds.ini из секрета'
-            printf '%s' "$CREDS_INI_CONTENT" > creds.ini
+            printf '%s' \"$CREDS_INI_CONTENT\" > creds.ini
 
             echo '🌍 Создаём /etc/default/tutor_bot'
-            # systemd EnvironmentFile — без "export"
-            echo "MONGO_URI=$MONGO_URI" | sudo tee /etc/default/tutor_bot > /dev/null
+            # systemd EnvironmentFile — просто KEY=VALUE
+            echo \"MONGO_URI=$MONGO_URI\" | sudo tee /etc/default/tutor_bot > /dev/null
             sudo chmod 644 /etc/default/tutor_bot
 
-            echo '📦 Удаляем poetry.lock и обновляем зависимости'
+            echo '📦 Удаляем poetry.lock и устанавливаем зависимости'
             rm -f poetry.lock
             poetry install --no-interaction
 
             echo '🔁 Перезапуск systemd-сервиса'
             sudo systemctl daemon-reexec
             sudo systemctl daemon-reload
-            sudo systemctl restart tutor_bot
+            sudo systemctl restart tutor_bot || sudo systemctl start tutor_bot
 
             echo '✅ Деплой завершён!'
-          SSH
+          "

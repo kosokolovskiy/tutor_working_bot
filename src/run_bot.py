@@ -31,7 +31,8 @@ logging.basicConfig(
 USERS, TOKEN, API_URL = get_creds()
 
 # Read creds.ini from the working directory (CI writes it here)
-creds_path = os.path.join(os.getcwd(), "creds.ini")
+# creds_path = os.path.join(os.getcwd(), "creds.ini")
+creds_path = "/home/ubuntu/tutor_bot/creds.ini"
 config = configparser.ConfigParser()
 config.read(creds_path)
 
