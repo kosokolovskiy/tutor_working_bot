@@ -22,57 +22,54 @@ jobs:
 
       - name: Clean and prepare remote folder
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" <<'SSH'
             set -e
             rm -rf ~/tutor_bot
             mkdir -p ~/tutor_bot
-          EOF
+          SSH
 
       - name: Upload project to EC2
         run: |
-          scp -r . ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot
+          scp -o StrictHostKeyChecking=no -r . "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot"
 
       - name: Setup, install, and restart bot
         env:
-          MONGO_HOST: ${{ secrets.MONGO_HOST }}
-          MONGO_PORT: ${{ secrets.MONGO_PORT }}
-          MONGO_USERNAME: ${{ secrets.MONGO_USERNAME }}
-          MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
           CREDS_INI_CONTENT: ${{ secrets.CREDS_INI_CONTENT }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}      # задавай сразу URI (реплика-сет)
           PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "
+          # Передаём PACKAGE_VERSION внутрь удалённой сессии явным экспортом
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "export PACKAGE_VERSION='${PACKAGE_VERSION}'; bash -s" <<'SSH'
             set -e
             cd ~/tutor_bot
 
             echo '📁 Create logs folder and log files + rights'
-            mkdir -p logs
-            touch logs/bot_stdout.log logs/bot_stderr.log
-            chmod 666 logs/bot_stdout.log logs/bot_stderr.log
+            mkdir -p logs && touch logs/bot_stdout.log logs/bot_stderr.log && chmod 666 logs/*.log
 
             echo '🔧 Setting up Poetry'
             curl -sSL https://install.python-poetry.org | python3 - || true
-            export PATH=\"\$HOME/.local/bin:\$PATH\"
+            export PATH="$HOME/.local/bin:$PATH"
 
             echo '📜 create creds.ini from secret'
-            echo \"$CREDS_INI_CONTENT\" > creds.ini
+            # используем printf, чтобы сохранить переводы строк
+            printf '%s' "$CREDS_INI_CONTENT" > creds.ini
 
             echo '📜 Create /etc/default/tutor_bot env file'
-            echo \"export MONGO_HOST=$MONGO_HOST\" | sudo tee /etc/default/tutor_bot > /dev/null
-            echo \"export MONGO_PORT=$MONGO_PORT\" | sudo tee -a /etc/default/tutor_bot > /dev/null
-            echo \"export MONGO_USERNAME=$MONGO_USERNAME\" | sudo tee -a /etc/default/tutor_bot > /dev/null
-            echo \"export MONGO_PASSWORD=$MONGO_PASSWORD\" | sudo tee -a /etc/default/tutor_bot > /dev/null
+            # твой код читает именно MONGO_URI
+            echo "export MONGO_URI=$MONGO_URI" | sudo tee /etc/default/tutor_bot > /dev/null
             sudo chmod 644 /etc/default/tutor_bot
 
-            echo '📦 Pin kosokolovsky-telegram-bot to exact version and install deps'
-            sudo apt-get update -y && sudo apt-get install -y git
+            echo '📦 Pin kosokolovsky_telegram_bot from Git tag and install deps'
+            # git почти наверняка уже есть; если нет — ставить можно отдельно
             rm -f poetry.lock
             poetry remove kosokolovsky-telegram-bot || true
             poetry remove kosokolovsky_telegram_bot || true
+            poetry config virtualenvs.in-project true
+            rm -rf .venv || true
 
-            # -- ВАЖНО: один цельный аргумент для Poetry 2.x (PEP 508 direct URL) --
-            REQ='kosokolovsky_telegram_bot @ git+https://github.com/kosokolovskiy/tutor_telegram_bot.git@'${PACKAGE_VERSION}
-            poetry add \"$REQ\" --no-interaction
+            # Сформируем ОДИН цельный PEP-508 аргумент для Poetry 2.x
+            REQ="kosokolovsky_telegram_bot @ git+https://github.com/kosokolovskiy/tutor_telegram_bot.git@${PACKAGE_VERSION}"
+            poetry add "$REQ" --no-interaction
 
             poetry install --no-interaction
 
@@ -82,4 +79,4 @@ jobs:
             sudo systemctl restart tutor_bot
 
             echo '✅ Deployment is finished!'
-          "
+          SSH
