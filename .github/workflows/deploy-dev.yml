@@ -8,7 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: students_new   # все secrets/vars берём из этого Environment
+    environment: students_new   # берём секреты/переменные из этого Environment
 
     steps:
       - name: Checkout repository
@@ -23,14 +23,14 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "
             set -e
-            echo '🧹 Удаляем старую папку и создаём новую...'
+            echo '🧹 Removing old folder and creating a new one...'
             rm -rf ~/tutor_bot
             mkdir -p ~/tutor_bot
           "
 
       - name: Upload project to EC2
         run: |
-          echo "📦 Копируем содержимое проекта на сервер..."
+          echo '📦 Uploading project to server...'
           scp -o StrictHostKeyChecking=no -r . "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot"
 
       - name: Setup, install, and restart bot
@@ -40,35 +40,49 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "
             set -e
-            echo '🚀 Переходим в папку проекта'
+            echo '🚀 cd project'
             cd ~/tutor_bot
 
-            echo '📁 Создаём папку logs и лог-файлы, даём права'
+            echo '📁 logs'
             mkdir -p logs
             : > logs/bot_stdout.log
             : > logs/bot_stderr.log
             chmod 666 logs/bot_stdout.log logs/bot_stderr.log
 
-            echo '🔧 Установка Poetry (если нужно)'
+            echo '🔧 install Poetry (idempotent)'
             curl -sSL https://install.python-poetry.org | python3 - || true
-            export PATH=\"$HOME/.local/bin:$PATH\"
 
-            echo '📜 Создаём creds.ini из секрета'
+            # robust poetry path detection
+            export PATH=\"\$HOME/.local/bin:\$HOME/.poetry/bin:\$PATH\"
+            if command -v poetry >/dev/null 2>&1; then
+              POETRY=\$(command -v poetry)
+            elif [ -x \"\$HOME/.local/bin/poetry\" ]; then
+              POETRY=\"\$HOME/.local/bin/poetry\"
+            elif [ -x \"\$HOME/.poetry/bin/poetry\" ]; then
+              POETRY=\"\$HOME/.poetry/bin/poetry\"
+            else
+              echo '❌ Poetry not found after install'; exit 1
+            fi
+            echo \"Poetry -> \$POETRY\"
+
+            echo '📜 write creds.ini'
             printf '%s' \"$CREDS_INI_CONTENT\" > creds.ini
 
-            echo '🌍 Создаём /etc/default/tutor_bot'
-            # systemd EnvironmentFile — просто KEY=VALUE
+            echo '🌍 write /etc/default/tutor_bot'
+            # systemd EnvironmentFile — просто KEY=VALUE (без export)
             echo \"MONGO_URI=$MONGO_URI\" | sudo tee /etc/default/tutor_bot > /dev/null
             sudo chmod 644 /etc/default/tutor_bot
 
-            echo '📦 Удаляем poetry.lock и устанавливаем зависимости'
+            echo '📦 install deps'
             rm -f poetry.lock
-            poetry install --no-interaction
+            \"\$POETRY\" config virtualenvs.in-project true
+            \"\$POETRY\" install --no-interaction
 
-            echo '🔁 Перезапуск systemd-сервиса'
-            sudo systemctl daemon-reexec
-            sudo systemctl daemon-reload
+            echo '🔁 systemd reload & (re)start'
+            sudo systemctl daemon-reexec || true
+            sudo systemctl daemon-reload || true
+            # если юнит уже есть — рестарт; если нет — старт
             sudo systemctl restart tutor_bot || sudo systemctl start tutor_bot
 
-            echo '✅ Деплой завершён!'
+            echo '✅ deploy finished'
           "
