@@ -1,18 +1,20 @@
-# run_bot.py  — event-based вариант, без JobQueue и без потоков
-
 import os
 import asyncio
 import logging
 import configparser
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+from telegram import Update
+from telegram.ext import ContextTypes, CommandHandler
+
 from motor.motor_asyncio import AsyncIOMotorClient
-from telegram.ext import ContextTypes  # только для type hints
+from bson import BSON
 
 from get_creds import get_creds
 from kosokolovsky_telegram_bot import MyBot
-from main import doneOrNot  # синхронная/тяжёлая функция — уводим в to_thread
+from main import doneOrNot
 
-# ----------------- ЛОГИ -----------------
+# ----------------- LOGGING -----------------
 log_dir = os.path.join(os.getcwd(), "logs")
 os.makedirs(log_dir, exist_ok=True)
 
@@ -28,8 +30,8 @@ logging.basicConfig(
 # ----------------- CREDS / CONFIG -----------------
 USERS, TOKEN, API_URL = get_creds()
 
-# creds_path = os.path.join(os.path.dirname(__file__), "../..", "creds.ini")
-creds_path = "/Users/konstantinsokolovskiy/Desktop/web_scrapping/polyakov_23_24/files/tutor_telegram_bot/creds.ini"
+# Read creds.ini from the working directory (CI writes it here)
+creds_path = os.path.join(os.getcwd(), "creds.ini")
 config = configparser.ConfigParser()
 config.read(creds_path)
 
@@ -38,24 +40,22 @@ username = config["MAIN"]["username"]
 password = config["MAIN"]["password"]
 rds_endpoint = config["MAIN"]["rds_endpoint"]
 
-# Mongo настройки — лучше вынести в переменные окружения или отдельный секшен в creds.ini
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://172.31.44.220:27017/?replicaSet=rs0")
+# ----------------- MONGO -----------------
+# Configure MongoDB connection (replica set is required for change streams)
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017/?replicaSet=rs0")
 DB_NAME = os.getenv("MONGO_DB", "log_db")
 ANSWERS_COLL = os.getenv("MONGO_COLL", "logs")
 
-# Резюм-токен для change stream (чтобы не терять события при рестарте)
+# Persist resume token to avoid missing events across restarts
 RESUME_FILE = os.path.join(os.path.dirname(__file__), "cache", "mongo_resume_token.bson")
 
-# Антидребезг — не чаще, чем раз в N секунд на ученика
+# Avoid excessive recomputes when multiple events arrive in a short burst
 DEBOUNCE_SECONDS = 3.0
 _debounce: Dict[str, float] = {}
 
-# Включать ли реальные отправки сообщений (иначе — только обновление bot_data)
-SEND_MESSAGES = False
-
-
-# ----------------- УТИЛИТЫ -----------------
+# ----------------- HELPERS -----------------
 def format_missing_tasks_markdown(missing_tasks: Dict[int, Any]) -> str:
+    """Format result of doneOrNot into a Markdown message."""
     if not missing_tasks:
         return "✅ All is done. Enjoy the moment!"
     message = "*📌 ToDo:*\n\n"
@@ -64,21 +64,24 @@ def format_missing_tasks_markdown(missing_tasks: Dict[int, Any]) -> str:
         message += f"• *Task {task}:* \n\t`{nums_str}`\n\n"
     return message
 
+def chat_id_to_student(chat_id: int) -> Optional[str]:
+    """Map Telegram chat_id to student_name using USERS mapping."""
+    for name, cid in USERS.items():
+        if str(cid) == str(chat_id):
+            return name
+    return None
 
 def _save_resume_token(token: Dict[str, Any]) -> None:
+    """Persist the change stream resume token to disk (binary BSON)."""
     if not token:
         return
     os.makedirs(os.path.dirname(RESUME_FILE), exist_ok=True)
-    # сохраняем бинарно, чтобы не парсить вручную
     with open(RESUME_FILE, "wb") as f:
-        # _id в change stream — это BSON документ; берём .binary из RawBSONDocument если надо
-        from bson import BSON
         f.write(BSON.encode(token))
 
-
-def _load_resume_token() -> Dict[str, Any] | None:
+def _load_resume_token() -> Optional[Dict[str, Any]]:
+    """Load resume token from disk (if present)."""
     try:
-        from bson import BSON
         with open(RESUME_FILE, "rb") as f:
             return BSON(f.read()).decode()
     except FileNotFoundError:
@@ -87,48 +90,44 @@ def _load_resume_token() -> Dict[str, Any] | None:
         logging.exception("Failed to load resume token")
         return None
 
+# ----------------- CACHE KEYS -----------------
+# application.bot_data will hold two views:
+#   progress/<student_name>  -> raw dict from doneOrNot
+#   progress_msg/<chat_id>   -> preformatted Markdown message
+PROGRESS_KEY = "progress/{student}"
+PROGRESS_MSG_KEY = "progress_msg/{chat_id}"
 
-# ----------------- НОТИФИКАЦИЯ УЧЕНИКА -----------------
-async def notify_student(application, student_name: str) -> None:
-    """Пересчитать прогресс и обновить bot_data/отправить сообщение конкретному ученику."""
-    chat_id = USERS.get(student_name)
-    if not chat_id:
-        logging.debug(f"Unknown student '{student_name}', skip")
-        return
+async def recompute_student(application, student_name: str) -> None:
+    """
+    Recompute a student's progress and update the cache.
+    No messages are sent here; only cache gets updated.
+    """
+    try:
+        # doneOrNot is blocking → run it in a thread pool
+        nums = await asyncio.to_thread(doneOrNot, student_name=student_name)
+        application.bot_data[PROGRESS_KEY.format(student=student_name)] = nums
 
-    # doneOrNot — синхронный расчёт → уводим в thread pool
-    nums = await asyncio.to_thread(doneOrNot, student_name=student_name)
-    msg = format_missing_tasks_markdown(nums)
+        chat_id = USERS.get(student_name)
+        if chat_id:
+            msg = format_missing_tasks_markdown(nums)
+            application.bot_data[PROGRESS_MSG_KEY.format(chat_id=chat_id)] = msg
 
-    # Антиспам: шлём/обновляем только если изменилось содержимое
-    key = f"custom_message_{chat_id}"
-    prev = application.bot_data.get(key)
-    if prev == msg:
-        logging.debug(f"No change for {student_name}, skip sending")
-        return
+        logging.info("Cache updated for %s", student_name)
+    except Exception:
+        logging.exception("Failed to recompute for %s", student_name)
 
-    application.bot_data[key] = msg
-    logging.info(f"Updated bot_data[{chat_id}] for {student_name}")
-
-    if SEND_MESSAGES:
-        try:
-            await application.bot.send_message(chat_id, msg, parse_mode="Markdown")
-        except Exception:
-            logging.exception(f"Failed to send message to {chat_id}")
-
-
-# ----------------- WATCHER MONGO -----------------
+# ----------------- MONGO WATCHER -----------------
 async def watch_answers(application) -> None:
     """
-    Слушаем MongoDB Change Streams по коллекции ответов.
-    На insert/update/replace триггерим notify_student для соответствующего ученика.
+    Listen to MongoDB change streams on the answers collection.
+    On insert/update/replace → recompute cache for the affected student.
     """
     client = AsyncIOMotorClient(MONGO_URI)
     coll = client[DB_NAME][ANSWERS_COLL]
 
     pipeline = [
         {"$match": {"operationType": {"$in": ["insert", "update", "replace"]}}}
-        # при желании фильтруй по предметам/классам тут
+        # If needed, add more filters here
     ]
 
     resume_token = _load_resume_token()
@@ -142,26 +141,26 @@ async def watch_answers(application) -> None:
             async with coll.watch(**kwargs) as stream:
                 logging.info("Mongo change stream started")
                 async for change in stream:
-                    # сохраняем токен как можно раньше
+                    # Save token early to be resilient to restarts
                     token = change.get("_id")
                     if token:
                         resume_token = token
                         _save_resume_token(token)
 
                     doc = change.get("fullDocument") or {}
-                    # подстрой ключ под твою схему документа
+                    # IMPORTANT: adjust the key if your schema uses another field than "username"
                     student_name = doc.get("username")
                     if not student_name:
                         continue
 
-                    # Дебаунс: не чаще раза в N секунд на ученика
+                    # Debounce recompute for this student
                     now = asyncio.get_running_loop().time()
                     last = _debounce.get(student_name, 0.0)
                     if now - last < DEBOUNCE_SECONDS:
                         continue
                     _debounce[student_name] = now
 
-                    application.create_task(notify_student(application, student_name))
+                    application.create_task(recompute_student(application, student_name))
 
         except asyncio.CancelledError:
             raise
@@ -169,12 +168,48 @@ async def watch_answers(application) -> None:
             logging.exception("Change stream error — retry in 5s")
             await asyncio.sleep(5)
 
+# ----------------- COMMANDS -----------------
+async def on_progress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Reply with student's progress from cache; if cache is empty (e.g., after restart),
+    compute on-the-fly and populate the cache before replying.
+    """
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if chat_id is None:
+        return
 
-# ----------------- ИНИЦИАЛИЗАЦИЯ PTB -----------------
+    student_name = chat_id_to_student(chat_id)
+    if not student_name:
+        await context.bot.send_message(chat_id, "⛔️ You don't have access to this bot.")
+        return
+
+    # 1) Try cached preformatted message
+    cached_msg = context.application.bot_data.get(PROGRESS_MSG_KEY.format(chat_id=chat_id))
+    if cached_msg:
+        await context.bot.send_message(chat_id, cached_msg, parse_mode="Markdown")
+        return
+
+    # 2) No cache → compute quickly and cache
+    try:
+        await recompute_student(context.application, student_name)
+        cached_msg = context.application.bot_data.get(PROGRESS_MSG_KEY.format(chat_id=chat_id))
+        if not cached_msg:
+            cached_nums = context.application.bot_data.get(PROGRESS_KEY.format(student=student_name), {})
+            cached_msg = format_missing_tasks_markdown(cached_nums)
+        await context.bot.send_message(chat_id, cached_msg, parse_mode="Markdown")
+    except Exception:
+        logging.exception("on_progress failed for %s", student_name)
+        await context.bot.send_message(chat_id, "⚠️ Failed to get progress. Please try again later.")
+
+# ----------------- PTB APP INIT -----------------
 async def _post_init(app):
-    # Запускаем watcher в том же event loop PTB
+    # Register commands (aliases)
+    app.add_handler(CommandHandler(["todo", "progress", "status"], on_progress))
+    # Prewarm cache for all known students (runs in background)
+    for student in USERS.keys():
+        app.create_task(recompute_student(app, student))
+    # Start Mongo watcher in background
     app.create_task(watch_answers(app))
-
 
 if __name__ == '__main__':
     app = MyBot.run_bot(TOKEN)
