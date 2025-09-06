@@ -9,6 +9,7 @@ from datetime import date
 from datetime import datetime, timedelta
 
 creds_path = os.path.join(os.path.dirname(__file__), "../../creds.ini")
+creds_path = "/home/ubuntu/tutor_bot/creds.ini"
 
 config = configparser.ConfigParser()
 config.read(creds_path)
