@@ -67,7 +67,8 @@ jobs:
             echo '📦 Pin kosokolovsky-telegram-bot to exact version and install deps'
             rm -f poetry.lock
             poetry remove kosokolovsky-telegram-bot || true
-            poetry add "kosokolovsky_telegram_bot @ git+https://github.com/kosokolovskiy/tutor_telegram_bot.git@${PACKAGE_VERSION}" --no-interaction
+            poetry add kosokolovsky_telegram_bot\ @\ git+https://github.com/kosokolovskiy/tutor_telegram_bot.git@${PACKAGE_VERSION} --no-interaction
+
             poetry install --no-interaction
 
             echo '🔁 Restart systemd service'
