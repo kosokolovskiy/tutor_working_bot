@@ -43,8 +43,10 @@ rds_endpoint = config["MAIN"]["rds_endpoint"]
 
 # ----------------- MONGO -----------------
 # Configure MongoDB connection (replica set is required for change streams)
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017/?replicaSet=rs0")
-DB_NAME = os.getenv("MONGO_DB", "inf_answers")
+
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017/?authSource=admin&replicaSet=rs0")
+DB_NAME = "log_db"
+ANSWERS_COLL = "logs"
 
 # Persist resume token to avoid missing events across restarts
 RESUME_FILE = os.path.join(os.path.dirname(__file__), "cache", "mongo_resume_token.bson")
@@ -128,18 +130,11 @@ def _student_from_doc(doc: dict) -> Optional[str]:
     return None
 
 async def watch_answers(application) -> None:
-    """
-    Watch the whole database so we catch inserts/updates across collections '2'..'27'.
-    """
+    logging.info("Watcher starting. URI=%s DB=%s COLL=%s", MONGO_URI, DB_NAME, ANSWERS_COLL)
     client = AsyncIOMotorClient(MONGO_URI)
-    db = client[DB_NAME]
+    coll = client[DB_NAME][ANSWERS_COLL]
 
-    pipeline = [
-        {"$match": {"operationType": {"$in": ["insert", "update", "replace"]}}},
-        # You already want fresh docs when updated:
-        # fullDocument="updateLookup" is set below in the call
-    ]
-
+    pipeline = [{"$match": {"operationType": {"$in": ["insert", "update", "replace"]}}}]
     resume_token = _load_resume_token()
 
     while True:
@@ -148,36 +143,34 @@ async def watch_answers(application) -> None:
             if resume_token:
                 kwargs["resume_after"] = resume_token
 
-            # ⬇️ database-level change stream (not a single collection)
-            async with db.watch(**kwargs) as stream:
-                logging.info("Mongo DB change stream started on %s", DB_NAME)
+            async with coll.watch(**kwargs) as stream:
+                logging.info("Change stream started on %s.%s", DB_NAME, ANSWERS_COLL)
                 async for change in stream:
-                    # persist resume token
+                    logging.info("Change: op=%s _id=%s", change.get("operationType"), change.get("_id"))
                     token = change.get("_id")
                     if token:
                         resume_token = token
                         _save_resume_token(token)
 
                     doc = change.get("fullDocument") or {}
-                    student_name = _student_from_doc(doc)
+                    student_name = (doc.get("username") or "").strip().lower()
+                    logging.info("Doc username parsed: %r", student_name)
                     if not student_name:
-                        # nothing to recompute if we can't identify the student
                         continue
 
-                    # debounce
                     now = asyncio.get_running_loop().time()
-                    last = _debounce.get(student_name, 0.0)
-                    if now - last < DEBOUNCE_SECONDS:
+                    if now - _debounce.get(student_name, 0.0) < DEBOUNCE_SECONDS:
                         continue
                     _debounce[student_name] = now
 
                     application.create_task(recompute_student(application, student_name))
-
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logging.exception("Change stream error — retry in 5s")
+        except Exception as e:
+            logging.exception("Change stream error (%s). Retry in 5s", e)
             await asyncio.sleep(5)
+
+
 
 # ----------------- COMMANDS -----------------
 def _normalize_name(s: str) -> str:
