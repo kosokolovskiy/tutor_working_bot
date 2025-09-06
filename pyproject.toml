@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tutor_bot"
-version = "0.0.1"
+version = "0.0.2"
 description = "Production Telegram bot running on EC2"
 readme = "README.md"
 packages = [{ include = "src" }]
@@ -15,7 +15,6 @@ requests = "*"
 python-dotenv = "*"
 configparser = "*"
 
-kosokolovsky-telegram-bot = { git = "https://github.com/kosokolovskiy/tutor_telegram_bot.git", rev = "main" }
 connectors = { git = "https://github.com/kosokolovskiy/connectors.git", rev = "main" }
 
 [build-system]

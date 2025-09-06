@@ -1,0 +1,79 @@
+name: Deploy bot to EC2 (dev)
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE_VERSION: "0.0.2" 
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up SSH key for EC2
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Clean and prepare remote folder
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
+            rm -rf ~/tutor_bot
+            mkdir -p ~/tutor_bot
+          EOF
+
+      - name: Upload project to EC2
+        run: |
+          scp -r . ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot
+
+      - name: Setup, install, and restart bot
+        env:
+          MONGO_HOST: ${{ secrets.MONGO_HOST }}
+          MONGO_PORT: ${{ secrets.MONGO_PORT }}
+          MONGO_USERNAME: ${{ secrets.MONGO_USERNAME }}
+          MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+          CREDS_INI_CONTENT: ${{ secrets.CREDS_INI_CONTENT }}
+          PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "
+            set -e
+            cd ~/tutor_bot
+
+            echo '📁 Create logs folder and log files + rights'
+            mkdir -p logs
+            touch logs/bot_stdout.log logs/bot_stderr.log
+            chmod 666 logs/bot_stdout.log logs/bot_stderr.log
+
+            echo '🔧 Setting up Poetry'
+            curl -sSL https://install.python-poetry.org | python3 - || true
+            export PATH=\"\$HOME/.local/bin:\$PATH\"
+
+            echo '📜 create creds.ini from secret'
+            echo \"$CREDS_INI_CONTENT\" > creds.ini
+
+            echo '📜 Create /etc/default/tutor_bot env file'
+            echo \"export MONGO_HOST=$MONGO_HOST\" | sudo tee /etc/default/tutor_bot > /dev/null
+            echo \"export MONGO_PORT=$MONGO_PORT\" | sudo tee -a /etc/default/tutor_bot > /dev/null
+            echo \"export MONGO_USERNAME=$MONGO_USERNAME\" | sudo tee -a /etc/default/tutor_bot > /dev/null
+            echo \"export MONGO_PASSWORD=$MONGO_PASSWORD\" | sudo tee -a /etc/default/tutor_bot > /dev/null
+            sudo chmod 644 /etc/default/tutor_bot
+
+            echo '📦 Pin kosokolovsky-telegram-bot to exact version and install deps'
+            rm -f poetry.lock
+            poetry remove kosokolovsky-telegram-bot || true
+            poetry add \"kosokolovsky-telegram-bot==${PACKAGE_VERSION}\" --no-interaction
+            poetry install --no-interaction
+
+            echo '🔁 Restart systemd service'
+            sudo systemctl daemon-reexec
+            sudo systemctl daemon-reload
+            sudo systemctl restart tutor_bot
+
+            echo '✅ Deployment is finished!'
+          "
