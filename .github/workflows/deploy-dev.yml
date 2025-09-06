@@ -8,7 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: students_new   # <-- ВСЁ берётся из окружения students_new
+    environment: students_new
 
     steps:
       - name: Checkout repository
@@ -21,7 +21,7 @@ jobs:
 
       - name: Clean and prepare remote folder
         run: |
-          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" << 'SSH'
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" <<'SSH'
             set -e
             echo "🧹 Removing old folder and creating a new one..."
             rm -rf ~/tutor_bot
@@ -33,12 +33,21 @@ jobs:
           echo "📦 Uploading project to server..."
           scp -o StrictHostKeyChecking=no -r . "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot"
 
-      - name: Setup, install, and restart bot
+      # >>> добавили отдельную заливку creds.ini (надёжно с многострочным секретом)
+      - name: Upload creds.ini securely
         env:
           CREDS_INI_CONTENT: ${{ secrets.CREDS_INI_CONTENT }}
-          MONGO_URI:         ${{ secrets.MONGO_URI }}   # <-- один секрет с готовым URI
         run: |
-          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "bash -s" << 'SSH'
+          printf '%s' "$CREDS_INI_CONTENT" > /tmp/creds.ini
+          scp -o StrictHostKeyChecking=no /tmp/creds.ini "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/tutor_bot/creds.ini"
+          rm -f /tmp/creds.ini
+
+      - name: Setup, install, and restart bot
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}   # один секрет с готовым URI
+          EC2_USER:  ${{ secrets.EC2_USER }}    # чтобы подставить в unit путь/юзера
+        run: |
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "bash -s" <<'SSH'
             set -e
             echo '🚀 cd to project'
             cd ~/tutor_bot
@@ -53,24 +62,59 @@ jobs:
             curl -sSL https://install.python-poetry.org | python3 - || true
             export PATH="$HOME/.local/bin:$PATH"
 
-            echo '📜 write creds.ini from secret'
-            printf '%s' "$CREDS_INI_CONTENT" > creds.ini
-
             echo '🌍 write systemd env file'
-            echo "export MONGO_URI=$MONGO_URI" | sudo tee /etc/default/tutor_bot > /dev/null
-            sudo chmod 644 /etc/default/tutor_bot
+            # MONGO_URI мы не знаем тут — передадим через shell vars ниже (см. EOF команду)
+            # сам файл создадим одной командой внутри "EOF"-блока
+            :
 
             echo '📦 install deps with Poetry'
             rm -f poetry.lock
             poetry config virtualenvs.in-project true
-            # если меняли зависимости/источники ранее:
-            # poetry cache clear pypi --all -n || true
             poetry install --no-interaction
+
+            # --- ensure systemd unit exists (one-time) ---
+            if [ ! -f /etc/systemd/system/tutor_bot.service ]; then
+              echo '🛠 Create systemd unit /etc/systemd/system/tutor_bot.service'
+              sudo tee /etc/systemd/system/tutor_bot.service >/dev/null <<UNIT
+[Unit]
+Description=Tutor Telegram Bot
+After=network-online.target mongod.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${EC2_USER}
+WorkingDirectory=/home/${EC2_USER}/tutor_bot
+EnvironmentFile=/etc/default/tutor_bot
+ExecStart=/home/${EC2_USER}/tutor_bot/.venv/bin/python src/run_bot.py
+Restart=always
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+              sudo systemctl daemon-reload
+              sudo systemctl enable tutor_bot
+            fi
+
+            # Запишем MONGO_URI сейчас (его мы передадим через STDIN ниже)
+            sudo tee /etc/default/tutor_bot >/dev/null <<ENVF
+export MONGO_URI=__WILL_BE_INJECTED__
+ENVF
+            sudo chmod 644 /etc/default/tutor_bot
 
             echo '🔁 restart systemd service'
             sudo systemctl daemon-reexec
             sudo systemctl daemon-reload
-            sudo systemctl restart tutor_bot
+            sudo systemctl restart tutor_bot || true
+            sudo systemctl status --no-pager tutor_bot || true
+            sudo journalctl -u tutor_bot -n 80 --no-pager || true
 
             echo '✅ deploy finished'
           SSH
+
+          # <<< ВАЖНО: после heredoc заменим плейсхолдер на реальный URI одной ssh-командой
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "sudo sed -i 's|export MONGO_URI=__WILL_BE_INJECTED__|export MONGO_URI=${MONGO_URI//|/\\|}|' /etc/default/tutor_bot && sudo systemctl restart tutor_bot"

@@ -14,6 +14,7 @@ python-telegram-bot = "*"
 requests = "*"
 python-dotenv = "*"
 configparser = "*"
+motor = "*"
 
 kosokolovsky-telegram-bot = { git = "https://github.com/kosokolovskiy/tutor_telegram_bot.git", rev = "dev" }
 connectors = { git = "https://github.com/kosokolovskiy/connectors.git", rev = "main" }
