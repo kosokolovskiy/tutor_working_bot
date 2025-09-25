@@ -4,6 +4,7 @@ import logging
 import configparser
 import re
 from typing import Dict, Any, Optional
+from datetime import datetime
 
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
@@ -89,6 +90,30 @@ RESUME_FILE = os.path.join(os.path.dirname(__file__), "cache", "mongo_resume_tok
 # Avoid excessive recomputes when multiple events arrive in a short burst
 DEBOUNCE_SECONDS = 3.0
 _debounce: Dict[str, float] = {}
+
+async def _emit_homework_echo(target_username: str, by_username: str = "admin", event: str = "assigned_echo_from_bot") -> None:
+    """
+    Пишем документ в log_db.logs в том же формате, как делает приложение:
+      { task, num, answer, date, username }
+    Плюс добавляем ts и event для удобной отладки.
+    """
+    try:
+        client = AsyncIOMotorClient(MONGO_URI)
+        coll = client[DB_NAME][ANSWERS_COLL]
+        doc = {
+            "task": 1,
+            "num": 1,
+            "answer": f"add_homework_to_{(target_username or '').strip().lower()}",
+            "date": datetime.utcnow().strftime("%Y-%m-%d %H-%M-%S"),
+            "username": by_username,
+            "ts": datetime.utcnow(),
+            "event": event
+        }
+        await coll.insert_one(doc)
+        logging.info("BOT ECHO OK: %r", doc)
+    except Exception:
+        logging.exception("BOT ECHO FAILED for %s", target_username)
+
 
 # ----------------- HELPERS -----------------
 def format_missing_tasks_markdown(missing_tasks: Dict[int, Any]) -> str:
@@ -330,15 +355,50 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode="Markdown"
     )
 
+async def on_hw_echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /hw_echo <username>
+    Админская команда: записывает эхо-док в Mongo формата
+    {task, num, answer: 'add_homework_to_<username>', date, username:'admin'}
+    чтобы вотчер пересчитал кеш для ученика.
+    """
+    if not update.effective_chat:
+        return
+
+    chat_id = update.effective_chat.id
+    try:
+        admin_id_val = int(MyBot.get_admin_id())
+    except Exception:
+        admin_id_val = None
+
+    if admin_id_val is None or chat_id != admin_id_val:
+        await context.bot.send_message(chat_id, "⛔️ Admin only.")
+        return
+
+    if not context.args:
+        await context.bot.send_message(chat_id, "Usage: /hw_echo <username>")
+        return
+
+    target_student = context.args[0].strip().lower()
+    if target_student not in USERS:
+        await context.bot.send_message(chat_id, f"User not found: {target_student}")
+        return
+
+    await _emit_homework_echo(target_student, by_username="admin", event="assigned_echo_from_bot")
+    await context.bot.send_message(chat_id, f"✅ Echo inserted for {target_student}")
+
+
 # ----------------- PTB APP INIT -----------------
 async def _post_init(app):
     app.add_handler(CommandHandler(["todo", "progress", "status", "check"], on_status))
     app.add_handler(CommandHandler(["debug_admin"], debug_admin))
+    app.add_handler(CommandHandler(["hw_echo"], on_hw_echo))  # <--- добавь это
 
     for student in USERS.keys():
         app.create_task(recompute_student(app, student))
 
     app.create_task(watch_answers(app))
+
 
 if __name__ == '__main__':
     app = MyBot.run_bot(TOKEN)
