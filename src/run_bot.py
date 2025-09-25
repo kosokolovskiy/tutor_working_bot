@@ -207,8 +207,11 @@ async def watch_answers(application) -> None:
 
 
                     now = asyncio.get_running_loop().time()
-                    if now - _debounce.get(student_name, 0.0) < DEBOUNCE_SECONDS:
+                    last = _debounce.get(student_name, 0.0)
+                    if now - last < DEBOUNCE_SECONDS:
+                        logging.info("Debounced event for %s (%.2fs < %.2fs)", student_name, now - last, DEBOUNCE_SECONDS)
                         continue
+
                     _debounce[student_name] = now
 
                     application.create_task(recompute_student(application, student_name))

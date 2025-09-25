@@ -42,11 +42,11 @@ def _echo_assigned_to_mongo(target_username: str, record_date: str) -> None:
     }
     try:
         client = MongoClient(MONGO_URI)
-        client[DB_NAME][ANSWERS_COLL].insert_one(payload)
+        res = client[DB_NAME][ANSWERS_COLL].insert_one(payload)
+        logging.info("MONGO ECHO OK: uri=%s coll=%s.%s inserted_id=%s target=%s",
+                     MONGO_URI, DB_NAME, ANSWERS_COLL, getattr(res, "inserted_id", None), target_username)
     except Exception as e:
-        logging.warning("Mongo echo failed: %s", e)
-
-
+        logging.exception("Mongo echo failed: %s", e)
 
 class DBAnalyzer:
     def __init__(self):
