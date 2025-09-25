@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import configparser
+import re
 from typing import Dict, Any, Optional
 
 from telegram import Update
@@ -120,13 +121,25 @@ async def recompute_student(application, student_name: str) -> None:
 
 # ----------------- MONGO WATCHER -----------------
 
+ADD_HW_RE = re.compile(r"^add_homework_to_(?P<user>[A-Za-z0-9_]+)$")
+
 def _student_from_doc(doc: dict) -> Optional[str]:
-    """Try common field names used in your documents."""
-    # Your data uses 'USER' (upper-case) in difference.py, so check that first
+    """
+    Сначала пробуем распарсить целевого ученика из answer=add_homework_to_<user>
+    (это наш «эхо»-формат после INSERT в MySQL).
+    Если такого нет — берём прямые поля USER/username/user/student/name.
+    """
+    ans = doc.get("answer")
+    if isinstance(ans, str):
+        m = ADD_HW_RE.match(ans.strip())
+        if m and m.group("user"):
+            return m.group("user").strip().lower()
+
     for k in ("USER", "username", "user", "student", "name"):
         v = doc.get(k)
         if isinstance(v, str) and v.strip():
             return v.strip().lower()
+
     return None
 
 async def watch_answers(application) -> None:
@@ -153,10 +166,11 @@ async def watch_answers(application) -> None:
                         _save_resume_token(token)
 
                     doc = change.get("fullDocument") or {}
-                    student_name = (doc.get("username") or "").strip().lower()
+                    student_name = _student_from_doc(doc) or ""
                     logging.info("Doc username parsed: %r", student_name)
                     if not student_name:
                         continue
+
 
                     now = asyncio.get_running_loop().time()
                     if now - _debounce.get(student_name, 0.0) < DEBOUNCE_SECONDS:
@@ -177,7 +191,6 @@ def _normalize_name(s: str) -> str:
     return s.strip().lower().replace("@", "")
 
 def _name_to_chat_id(student_name: str) -> Optional[int]:
-    # USERS: {name -> chat_id}
     return USERS.get(student_name)
 
 async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -249,20 +262,16 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_message(
         requester_chat_id,
         cached_msg,
-        parse_mode="Markdown"  # наш форматтер делает Markdown, не V2
+        parse_mode="Markdown"
     )
 
 # ----------------- PTB APP INIT -----------------
 async def _post_init(app):
-    # Register commands:
-    # /todo, /progress, /status, /check — все ведут на один и тот же хэндлер
     app.add_handler(CommandHandler(["todo", "progress", "status", "check"], on_status))
 
-    # Prewarm cache for all known students (background)
     for student in USERS.keys():
         app.create_task(recompute_student(app, student))
 
-    # Start Mongo watcher (background) — чтобы кэш был свежим без задержки
     app.create_task(watch_answers(app))
 
 if __name__ == '__main__':

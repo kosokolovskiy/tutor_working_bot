@@ -3,10 +3,19 @@ from connectors.mongodb import MongoConnector
 from connectors.mysql import SQLConnector
 import configparser
 import os
+import logging  # <<< добавили
 
 import json
 from datetime import date
 from datetime import datetime, timedelta
+
+from pymongo import MongoClient
+
+MONGO_URI = "mongodb://127.0.0.1:27017/?authSource=admin&replicaSet=rs0"
+DB_NAME = "log_db"
+ANSWERS_COLL = "logs"
+ADMIN_USERNAME = "admin"
+
 
 creds_path = os.path.join(os.path.dirname(__file__), "../../creds.ini")
 creds_path = "/home/ubuntu/tutor_bot/creds.ini"
@@ -19,6 +28,25 @@ dbname = config["MAIN"]["dbname"]
 username = config["MAIN"]["username"]
 password = config["MAIN"]["password"]
 rds_endpoint = config["MAIN"]["rds_endpoint"]
+
+
+def _echo_assigned_to_mongo(target_username: str, record_date: str) -> None:
+    payload = {
+        "task": 1,
+        "num": 1,
+        "answer": f"add_homework_to_{(target_username or '').strip().lower()}",
+        "date": datetime.utcnow().strftime("%Y-%m-%d %H-%M-%S"),
+        "username": ADMIN_USERNAME,
+        "ts": datetime.utcnow(),
+        "event": "assigned_echo"
+    }
+    try:
+        client = MongoClient(MONGO_URI)
+        client[DB_NAME][ANSWERS_COLL].insert_one(payload)
+    except Exception as e:
+        logging.warning("Mongo echo failed: %s", e)
+
+
 
 class DBAnalyzer:
     def __init__(self):
