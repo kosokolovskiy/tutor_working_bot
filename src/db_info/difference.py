@@ -11,10 +11,14 @@ from datetime import datetime, timedelta
 
 from pymongo import MongoClient
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017/?authSource=admin&replicaSet=rs0")
+from pymongo import MongoClient
+
 DB_NAME = "log_db"
 ANSWERS_COLL = "logs"
 ADMIN_USERNAME = "admin"
+
+
+
 
 
 creds_path = os.path.join(os.path.dirname(__file__), "../../creds.ini")
@@ -23,6 +27,15 @@ creds_path = "/home/ubuntu/tutor_bot/creds.ini"
 config = configparser.ConfigParser()
 config.read(creds_path)
 
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    try:
+        MONGO_URI = config["MONGO"]["uri"].strip()
+    except Exception:
+        MONGO_URI = None
+
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI is not set (neither ENV nor [MONGO] uri in creds.ini)")
 
 dbname = config["MAIN"]["dbname"]
 username = config["MAIN"]["username"]
@@ -67,10 +80,12 @@ class DBAnalyzer:
 
 
     def ingestHomework(self, test_d, record_date, name):
+        norm_name = (name or "").strip().lower()
         with SQLConnector(dbname, username, password, rds_endpoint) as sql_conn:
-            self._insert_homework_data(sql_conn, record_date, name, test_d)
+            self._insert_homework_data(sql_conn, record_date, norm_name, test_d)
 
-        _echo_assigned_to_mongo(target_username=name, record_date=record_date)
+        _echo_assigned_to_mongo(target_username=norm_name, record_date=record_date)
+
 
 
     def findNotDone(self, student_name):
@@ -102,7 +117,8 @@ class DBAnalyzer:
 
         if not assigned_results:
             print("No assigned tasks found for this period and user.")
-            return
+            return {}
+
 
         assigned_tasks = {}
         done_tasks = {}
