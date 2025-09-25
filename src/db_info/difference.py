@@ -17,10 +17,6 @@ DB_NAME = "log_db"
 ANSWERS_COLL = "logs"
 ADMIN_USERNAME = "admin"
 
-
-
-
-
 creds_path = os.path.join(os.path.dirname(__file__), "../../creds.ini")
 creds_path = "/home/ubuntu/tutor_bot/creds.ini"
 

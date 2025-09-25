@@ -35,12 +35,12 @@ USERS, TOKEN, API_URL = get_creds()
 
 def _check_admin_identity():
     try:
-        admin_id_cfg = MyBot.get_admin_id()  # из creds.ini [USERS][admin]
+        admin_id_cfg = MyBot.get_admin_id()
     except Exception as e:
         logging.error("get_admin_id failed: %s", e)
         admin_id_cfg = None
 
-    admin_id_users = USERS.get("admin")      # из get_creds()
+    admin_id_users = USERS.get("admin")
 
     logging.info("ADMIN CHECK: admin_id_cfg=%r, admin_id_users=%r", admin_id_cfg, admin_id_users)
 
@@ -66,7 +66,6 @@ def _check_admin_identity():
         logging.info("ADMIN OK: %r", admin_id_cfg_int)
 
 
-# Read creds.ini from the working directory (CI writes it here)
 # creds_path = os.path.join(os.getcwd(), "creds.ini")
 creds_path = "/home/ubuntu/tutor_bot/creds.ini"
 config = configparser.ConfigParser()
@@ -92,11 +91,7 @@ DEBOUNCE_SECONDS = 3.0
 _debounce: Dict[str, float] = {}
 
 async def _emit_homework_echo(target_username: str, by_username: str = "admin", event: str = "assigned_echo_from_bot") -> None:
-    """
-    Пишем документ в log_db.logs в том же формате, как делает приложение:
-      { task, num, answer, date, username }
-    Плюс добавляем ts и event для удобной отладки.
-    """
+    """Insert a small MongoDB ‘echo’ document (add_homework_to_<user>) to trigger the watcher to recompute that student’s cache."""
     try:
         client = AsyncIOMotorClient(MONGO_URI)
         coll = client[DB_NAME][ANSWERS_COLL]
@@ -183,11 +178,7 @@ async def recompute_student(application, student_name: str) -> None:
 ADD_HW_RE = re.compile(r"^add_homework_to_(?P<user>[A-Za-z0-9_]+)$")
 
 def _student_from_doc(doc: dict) -> Optional[str]:
-    """
-    Сначала пробуем распарсить целевого ученика из answer=add_homework_to_<user>
-    (это наш «эхо»-формат после INSERT в MySQL).
-    Если такого нет — берём прямые поля USER/username/user/student/name.
-    """
+    """Extract target username from change doc: prefer answer=add_homework_to_<user>, else USER/username/user/student/name. Returns lowercase or None."""
     ans = doc.get("answer")
     if isinstance(ans, str):
         m = ADD_HW_RE.match(ans.strip())
@@ -202,6 +193,7 @@ def _student_from_doc(doc: dict) -> Optional[str]:
     return None
 
 async def watch_answers(application) -> None:
+    """Watch Mongo change stream, parse target student from each event, debounce, and schedule cache recompute; persists resume token."""
     logging.info("Watcher starting. URI=%s DB=%s COLL=%s", MONGO_URI, DB_NAME, ANSWERS_COLL)
     client = AsyncIOMotorClient(MONGO_URI)
     coll = client[DB_NAME][ANSWERS_COLL]
@@ -356,12 +348,7 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def on_hw_echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /hw_echo <username>
-    Админская команда: записывает эхо-док в Mongo формата
-    {task, num, answer: 'add_homework_to_<username>', date, username:'admin'}
-    чтобы вотчер пересчитал кеш для ученика.
-    """
+    """Admin-only: /hw_echo <username> — insert Mongo ‘add_homework_to_<username>’ echo to trigger watcher cache recompute."""
     if not update.effective_chat:
         return
 
