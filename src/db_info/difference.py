@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from pymongo import MongoClient
 
-MONGO_URI = "mongodb://127.0.0.1:27017/?authSource=admin&replicaSet=rs0"
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017/?authSource=admin&replicaSet=rs0")
 DB_NAME = "log_db"
 ANSWERS_COLL = "logs"
 ADMIN_USERNAME = "admin"
@@ -69,6 +69,8 @@ class DBAnalyzer:
     def ingestHomework(self, test_d, record_date, name):
         with SQLConnector(dbname, username, password, rds_endpoint) as sql_conn:
             self._insert_homework_data(sql_conn, record_date, name, test_d)
+
+        _echo_assigned_to_mongo(target_username=name, record_date=record_date)
 
 
     def findNotDone(self, student_name):
