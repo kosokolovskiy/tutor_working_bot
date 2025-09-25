@@ -31,6 +31,40 @@ logging.basicConfig(
 # ----------------- CREDS / CONFIG -----------------
 USERS, TOKEN, API_URL = get_creds()
 
+
+def _check_admin_identity():
+    try:
+        admin_id_cfg = MyBot.get_admin_id()  # из creds.ini [USERS][admin]
+    except Exception as e:
+        logging.error("get_admin_id failed: %s", e)
+        admin_id_cfg = None
+
+    admin_id_users = USERS.get("admin")      # из get_creds()
+
+    logging.info("ADMIN CHECK: admin_id_cfg=%r, admin_id_users=%r", admin_id_cfg, admin_id_users)
+
+    if admin_id_cfg is None or admin_id_users is None:
+        logging.warning("ADMIN CHECK: admin missing in one of sources (cfg/users)")
+        return
+
+    try:
+        admin_id_cfg_int = int(admin_id_cfg)
+    except Exception:
+        logging.warning("ADMIN CHECK: admin_id_cfg is not int: %r", admin_id_cfg)
+        admin_id_cfg_int = admin_id_cfg
+
+    try:
+        admin_id_users_int = int(admin_id_users)
+    except Exception:
+        logging.warning("ADMIN CHECK: admin_id_users is not int: %r", admin_id_users)
+        admin_id_users_int = admin_id_users
+
+    if admin_id_cfg_int != admin_id_users_int:
+        logging.error("ADMIN MISMATCH: creds.ini=%r vs USERS.get('admin')=%r", admin_id_cfg_int, admin_id_users_int)
+    else:
+        logging.info("ADMIN OK: %r", admin_id_cfg_int)
+
+
 # Read creds.ini from the working directory (CI writes it here)
 # creds_path = os.path.join(os.getcwd(), "creds.ini")
 creds_path = "/home/ubuntu/tutor_bot/creds.ini"
@@ -193,6 +227,30 @@ def _normalize_name(s: str) -> str:
 def _name_to_chat_id(student_name: str) -> Optional[int]:
     return USERS.get(student_name)
 
+async def debug_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    name = chat_id_to_student(chat_id) if chat_id else None
+    try:
+        admin_id_cfg = MyBot.get_admin_id()
+    except Exception as e:
+        admin_id_cfg = f"ERR: {e}"
+
+    admin_id_users = USERS.get("admin")
+    try:
+        admin_equal = (int(chat_id) == int(admin_id_cfg))
+    except Exception:
+        admin_equal = False
+
+    text = (
+        f"chat_id={chat_id}\n"
+        f"name={name}\n"
+        f"admin_id(cfg)={admin_id_cfg}\n"
+        f"admin_id(USERS)={admin_id_users}\n"
+        f"is_admin={admin_equal}"
+    )
+    await context.bot.send_message(chat_id, text)
+
+
 async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     /todo, /progress, /status, /check
@@ -205,11 +263,15 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     requester_chat_id = update.effective_chat.id
-    is_admin = False
     try:
-        is_admin = (requester_chat_id == MyBot.get_admin_id())
+        admin_id_val = int(MyBot.get_admin_id())
     except Exception as e:
         logging.warning("get_admin_id failed: %s", e)
+        admin_id_val = None
+
+    is_admin = (admin_id_val is not None and requester_chat_id == admin_id_val)
+    logging.info("ADMIN FLAG: requester=%r admin=%r is_admin=%r", requester_chat_id, admin_id_val, is_admin)
+
 
     target_chat_id: Optional[int] = None
     target_student_name: Optional[str] = None
@@ -268,6 +330,7 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ----------------- PTB APP INIT -----------------
 async def _post_init(app):
     app.add_handler(CommandHandler(["todo", "progress", "status", "check"], on_status))
+    app.add_handler(CommandHandler(["debug_admin"], debug_admin))
 
     for student in USERS.keys():
         app.create_task(recompute_student(app, student))
