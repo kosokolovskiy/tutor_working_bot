@@ -3,7 +3,7 @@ from connectors.mongodb import MongoConnector
 from connectors.mysql import SQLConnector
 import configparser
 import os
-import logging  # <<< добавили
+import logging
 
 import json
 from datetime import date
@@ -17,11 +17,10 @@ DB_NAME = "log_db"
 ANSWERS_COLL = "logs"
 ADMIN_USERNAME = "admin"
 
-creds_path = os.path.join(os.path.dirname(__file__), "../../creds.ini")
-creds_path = "/home/ubuntu/tutor_bot/creds.ini"
+CREDS_PATH = os.getenv("CREDS_PATH")
 
 config = configparser.ConfigParser()
-config.read(creds_path)
+config.read(CREDS_PATH)
 
 MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:

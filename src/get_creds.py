@@ -3,11 +3,10 @@ from configparser import ConfigParser
 from kosokolovsky_telegram_bot import MyBot 
 
 def get_creds():
-    creds_path = os.path.join(os.path.dirname(__file__), "../creds.ini")
-    creds_path = "/home/ubuntu/tutor_bot/creds.ini"
+    CREDS_PATH = os.getenv("CREDS_PATH")
 
     config = ConfigParser()
-    config.read(creds_path)
+    config.read(CREDS_PATH)
 
     USERS = {key: int(value) for key, value in config.items('USERS')}
     TOKENS = dict(config.items('TOKEN'))

@@ -66,10 +66,9 @@ def _check_admin_identity():
         logging.info("ADMIN OK: %r", admin_id_cfg_int)
 
 
-# creds_path = os.path.join(os.getcwd(), "creds.ini")
-creds_path = "/home/ubuntu/tutor_bot/creds.ini"
+CREDS_PATH = os.getenv("CREDS_PATH")
 config = configparser.ConfigParser()
-config.read(creds_path)
+config.read(CREDS_PATH)
 
 dbname = config["MAIN"]["dbname"]
 username = config["MAIN"]["username"]

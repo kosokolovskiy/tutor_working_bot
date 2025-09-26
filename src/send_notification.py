@@ -10,12 +10,11 @@ from connectors.mysql import SQLConnector
 
 
 
-creds_path = os.path.join(os.path.dirname(__file__), "../creds.ini")
-creds_path = "/home/ubuntu/tutor_bot/creds.ini"
+CREDS_PATH = os.getenv("CREDS_PATH")
 
 
 config = configparser.ConfigParser()
-config.read(creds_path)
+config.read(CREDS_PATH)
 
 
 dbname = config["MAIN"]["dbname"]
@@ -51,7 +50,7 @@ bot = MyBot()
 
 if homework:
     bot.send_notification(student_name, USERS[student_name], API_URL)
-    bot.send_notification('admin', USERS['admin'], API_URL)
+    bot.send_notification(student_name, USERS['admin'], API_URL)
 else:
     print('Start of Analysis...')
     obj = DBAnalyzer()
