@@ -274,15 +274,16 @@ async def debug_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     /todo, /progress, /status, /check
-    - non-admin: always returns their own missing HW (args ignored)
+    - non-admin: returns their own missing HW (args ignored) and sends a copy to admin
     - admin:
-        * with arg: returns that student's missing HW
-        * without arg: returns their own
+        * with arg: returns that student's missing HW (only to admin)
+        * without arg: returns their own (only to admin)
     """
     if not update.effective_chat:
         return
 
     requester_chat_id = update.effective_chat.id
+
     try:
         admin_id_val = int(MyBot.get_admin_id())
     except Exception as e:
@@ -292,42 +293,42 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     is_admin = (admin_id_val is not None and requester_chat_id == admin_id_val)
     logging.info("ADMIN FLAG: requester=%r admin=%r is_admin=%r", requester_chat_id, admin_id_val, is_admin)
 
-
     target_chat_id: Optional[int] = None
     target_student_name: Optional[str] = None
 
     if is_admin and context.args:
-        # admin requested a specific student
         arg_name = _normalize_name(context.args[0])
         cid = _name_to_chat_id(arg_name)
         if cid is None:
-            await context.bot.send_message(
-                requester_chat_id,
-                "User not found"
-            )
+            await context.bot.send_message(requester_chat_id, "User not found")
             return
         target_chat_id = cid
         target_student_name = arg_name
     else:
-        # non-admin OR admin without args -> self
         target_chat_id = requester_chat_id
         target_student_name = chat_id_to_student(requester_chat_id)
         if not target_student_name:
-            await context.bot.send_message(
-                requester_chat_id,
-                "⛔️ You don't have access to this bot."
-            )
+            if is_admin:
+                await context.bot.send_message(
+                    requester_chat_id,
+                    "ℹ️ You are admin. Provide a student name as an argument, e.g. `/status Ivan`.",
+                    parse_mode="Markdown",
+                )
+            else:
+                await context.bot.send_message(
+                    requester_chat_id,
+                    "⛔️ You don't have access to this bot."
+                )
             return
 
-    # Try cached, otherwise recompute and cache
     cache_key = PROGRESS_MSG_KEY.format(chat_id=target_chat_id)
     cached_msg = context.application.bot_data.get(cache_key)
+
     if not cached_msg:
         try:
             await recompute_student(context.application, target_student_name)
             cached_msg = context.application.bot_data.get(cache_key)
             if not cached_msg:
-                # Fallback: build from raw dict if present
                 raw = context.application.bot_data.get(
                     PROGRESS_KEY.format(student=target_student_name), {}
                 )
@@ -340,12 +341,24 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-    # Reply to the requester (admin or regular user)
-    await context.bot.send_message(
-        requester_chat_id,
-        cached_msg,
-        parse_mode="Markdown"
-    )
+    if is_admin:
+        await context.bot.send_message(
+            requester_chat_id,
+            cached_msg,
+            parse_mode="Markdown"
+        )
+    else:
+        recipients = {requester_chat_id}
+        if admin_id_val:
+            recipients.add(admin_id_val)
+
+        for chat_id in recipients:
+            if chat_id == admin_id_val and chat_id != requester_chat_id:
+                admin_copy = f"👤 *Student:* `{target_student_name}`\n\n{cached_msg}"
+                await context.bot.send_message(chat_id, admin_copy, parse_mode="Markdown")
+            else:
+                await context.bot.send_message(chat_id, cached_msg, parse_mode="Markdown")
+
 
 async def on_hw_echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin-only: /hw_echo <username> — insert Mongo ‘add_homework_to_<username>’ echo to trigger watcher cache recompute."""
@@ -379,7 +392,7 @@ async def on_hw_echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def _post_init(app):
     app.add_handler(CommandHandler(["todo", "progress", "status", "check"], on_status))
     app.add_handler(CommandHandler(["debug_admin"], debug_admin))
-    app.add_handler(CommandHandler(["hw_echo"], on_hw_echo))  # <--- добавь это
+    app.add_handler(CommandHandler(["hw_echo"], on_hw_echo))
 
     for student in USERS.keys():
         app.create_task(recompute_student(app, student))
