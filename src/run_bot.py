@@ -402,6 +402,8 @@ async def _post_init(app):
 
 
 if __name__ == '__main__':
+    print(CREDS_PATH)
+    logging.info("CREDS_PATH: %r", CREDS_PATH)
     app = MyBot.run_bot(TOKEN)
     app.post_init = _post_init
     app.run_polling()
