@@ -70,6 +70,8 @@ CREDS_PATH = os.getenv("CREDS_PATH")
 config = configparser.ConfigParser()
 config.read(CREDS_PATH)
 
+print(CREDS_PATH)
+
 dbname = config["MAIN"]["dbname"]
 username = config["MAIN"]["username"]
 password = config["MAIN"]["password"]

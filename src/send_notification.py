@@ -12,7 +12,6 @@ from connectors.mysql import SQLConnector
 
 CREDS_PATH = os.getenv("CREDS_PATH")
 
-
 config = configparser.ConfigParser()
 config.read(CREDS_PATH)
 
