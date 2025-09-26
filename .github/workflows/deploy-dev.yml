@@ -41,6 +41,7 @@ jobs:
           MONGO_PORT:        ${{ secrets.MONGO_PORT }}
           MONGO_USERNAME:    ${{ secrets.MONGO_USERNAME }}
           MONGO_PASSWORD:    ${{ secrets.MONGO_PASSWORD }}
+          CREDS_PATH:        ${{ secrets.CREDS_PATH }}
         run: |
           ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "
             set -e
