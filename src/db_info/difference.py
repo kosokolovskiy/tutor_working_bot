@@ -49,10 +49,12 @@ def _echo_assigned_to_mongo(target_username: str, record_date: str) -> None:
         "event": "assigned_echo"
     }
     try:
-        client = MongoClient(MONGO_URI)
+        url = MONGO_URI + ("&" if "?" in MONGO_URI else "?") + "directConnection=true"
+
+        client = MongoClient(url)
         res = client[DB_NAME][ANSWERS_COLL].insert_one(payload)
         logging.info("MONGO ECHO OK: uri=%s coll=%s.%s inserted_id=%s target=%s",
-                     MONGO_URI, DB_NAME, ANSWERS_COLL, getattr(res, "inserted_id", None), target_username)
+                     url, DB_NAME, ANSWERS_COLL, getattr(res, "inserted_id", None), target_username)
     except Exception as e:
         logging.exception("Mongo echo failed: %s", e)
 
