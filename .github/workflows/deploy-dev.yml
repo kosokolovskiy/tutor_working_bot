@@ -79,7 +79,7 @@ jobs:
             sudo chmod 644 /etc/default/tutor_bot
 
             echo '📦 install deps to global Python'
-            \"\$UV\" pip install --system -e .
+            sudo -E \"\$UV\" pip install --system -e .
 
             echo '🔁 systemd reload & (re)start'
             sudo systemctl daemon-reexec || true
