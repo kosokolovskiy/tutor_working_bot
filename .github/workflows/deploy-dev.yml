@@ -90,8 +90,9 @@ jobs:
             sudo -E env \"PATH=\$PATH\" \"\$POETRY\" install --no-interaction
 
             echo '🔧 update systemd service to use system Python'
-            PYTHON_PATH=\$(which python3)
-            sudo sed -i \"s|ExecStart=.*|ExecStart=$PYTHON_PATH /home/ubuntu/tutor_bot/src/run_bot.py|\" /etc/systemd/system/tutor_bot.service || true
+            sudo sed -i 's|ExecStart=.*|ExecStart=/usr/bin/python3 /home/ubuntu/tutor_bot/src/run_bot.py|' /etc/systemd/system/tutor_bot.service || true
+            chmod +x /home/ubuntu/tutor_bot/src/run_bot.py
+            chmod -R u+r /home/ubuntu/tutor_bot/src/
 
             echo '🔁 systemd reload & (re)start'
             sudo systemctl daemon-reexec || true
