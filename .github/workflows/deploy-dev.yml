@@ -83,6 +83,10 @@ jobs:
             echo '📦 install deps'
             rm -f poetry.lock
             \"\$POETRY\" config virtualenvs.in-project true
+            \"\$POETRY\" config cache-dir \"\$HOME/.cache/pypoetry\"
+            export POETRY_CACHE_DIR=\"\$HOME/.cache/pypoetry\"
+            export TMPDIR=\"\$HOME/tmp\"
+            mkdir -p \"\$TMPDIR\"
             \"\$POETRY\" install --no-interaction
 
             echo '🔁 systemd reload & (re)start'
