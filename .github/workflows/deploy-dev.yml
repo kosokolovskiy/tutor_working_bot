@@ -80,14 +80,18 @@ jobs:
             echo \"CREDS_PATH=$CREDS_PATH\" | sudo tee -a /etc/default/tutor_bot > /dev/null
             sudo chmod 644 /etc/default/tutor_bot
 
-            echo '📦 install deps'
+            echo '📦 install deps to system Python'
             rm -f poetry.lock
-            \"\$POETRY\" config virtualenvs.in-project true
+            \"\$POETRY\" config virtualenvs.create false
             \"\$POETRY\" config cache-dir \"\$HOME/.cache/pypoetry\"
             export POETRY_CACHE_DIR=\"\$HOME/.cache/pypoetry\"
             export TMPDIR=\"\$HOME/tmp\"
             mkdir -p \"\$TMPDIR\"
             sudo -E env \"PATH=\$PATH\" \"\$POETRY\" install --no-interaction
+
+            echo '🔧 update systemd service to use system Python'
+            PYTHON_PATH=\$(which python3)
+            sudo sed -i \"s|ExecStart=.*|ExecStart=$PYTHON_PATH /home/ubuntu/tutor_bot/src/run_bot.py|\" /etc/systemd/system/tutor_bot.service || true
 
             echo '🔁 systemd reload & (re)start'
             sudo systemctl daemon-reexec || true
