@@ -54,17 +54,19 @@ jobs:
             : > logs/bot_stderr.log
             chmod 666 logs/bot_stdout.log logs/bot_stderr.log
 
-            echo '🔧 install uv (idempotent)'
-            curl -LsSf https://astral.sh/uv/install.sh | sh || true
-            export PATH=\"\$HOME/.local/bin:\$PATH\"
-            if command -v uv >/dev/null 2>&1; then
-              UV=\$(command -v uv)
-            elif [ -x \"\$HOME/.local/bin/uv\" ]; then
-              UV=\"\$HOME/.local/bin/uv\"
+            echo '🔧 install Poetry (idempotent)'
+            curl -sSL https://install.python-poetry.org | python3 - || true
+            export PATH=\"\$HOME/.local/bin:\$HOME/.poetry/bin:\$PATH\"
+            if command -v poetry >/dev/null 2>&1; then
+              POETRY=\$(command -v poetry)
+            elif [ -x \"\$HOME/.local/bin/poetry\" ]; then
+              POETRY=\"\$HOME/.local/bin/poetry\"
+            elif [ -x \"\$HOME/.poetry/bin/poetry\" ]; then
+              POETRY=\"\$HOME/.poetry/bin/poetry\"
             else
-              echo '❌ uv not found after install'; exit 1
+              echo '❌ Poetry not found after install'; exit 1
             fi
-            echo \"uv -> \$UV\"
+            echo \"Poetry -> \$POETRY\"
 
             echo '📜 write creds.ini'
             printf '%s' \"$CREDS_INI_CONTENT\" > creds.ini
@@ -78,8 +80,10 @@ jobs:
             echo \"CREDS_PATH=$CREDS_PATH\" | sudo tee -a /etc/default/tutor_bot > /dev/null
             sudo chmod 644 /etc/default/tutor_bot
 
-            echo '📦 install deps to global Python'
-            sudo -E \"\$UV\" pip install --system -e .
+            echo '📦 install deps'
+            rm -f poetry.lock
+            \"\$POETRY\" config virtualenvs.in-project true
+            \"\$POETRY\" install --no-interaction
 
             echo '🔁 systemd reload & (re)start'
             sudo systemctl daemon-reexec || true
