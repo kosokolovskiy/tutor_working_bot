@@ -82,7 +82,7 @@ jobs:
 
             echo '📦 install deps'
             rm -f poetry.lock
-            \"\$POETRY\" config virtualenvs.in-project true
+            \"\$POETRY\" config virtualenvs.create false
             \"\$POETRY\" install --no-interaction
 
             echo '🔁 systemd reload & (re)start'
