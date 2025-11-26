@@ -56,11 +56,11 @@ jobs:
 
             echo '🔧 install uv (idempotent)'
             curl -LsSf https://astral.sh/uv/install.sh | sh || true
-            export PATH=\"\$HOME/.cargo/bin:\$PATH\"
+            export PATH=\"\$HOME/.local/bin:\$PATH\"
             if command -v uv >/dev/null 2>&1; then
               UV=\$(command -v uv)
-            elif [ -x \"\$HOME/.cargo/bin/uv\" ]; then
-              UV=\"\$HOME/.cargo/bin/uv\"
+            elif [ -x \"\$HOME/.local/bin/uv\" ]; then
+              UV=\"\$HOME/.local/bin/uv\"
             else
               echo '❌ uv not found after install'; exit 1
             fi
