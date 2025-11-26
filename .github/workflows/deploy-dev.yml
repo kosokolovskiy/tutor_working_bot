@@ -87,7 +87,7 @@ jobs:
             export POETRY_CACHE_DIR=\"\$HOME/.cache/pypoetry\"
             export TMPDIR=\"\$HOME/tmp\"
             mkdir -p \"\$TMPDIR\"
-            \"\$POETRY\" install --no-interaction
+            sudo -E env \"PATH=\$PATH\" \"\$POETRY\" install --no-interaction
 
             echo '🔁 systemd reload & (re)start'
             sudo systemctl daemon-reexec || true
