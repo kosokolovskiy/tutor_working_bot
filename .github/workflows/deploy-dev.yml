@@ -83,7 +83,9 @@ jobs:
             echo '📦 install deps'
             rm -f poetry.lock
             \"\$POETRY\" config virtualenvs.create false
-            \"\$POETRY\" install --no-interaction
+            \"\$POETRY\" config cache-dir \"\$HOME/.cache/pypoetry\"
+            \"\$POETRY\" config installer.max-workers 10
+            \"\$POETRY\" install --no-interaction --no-root
 
             echo '🔁 systemd reload & (re)start'
             sudo systemctl daemon-reexec || true
