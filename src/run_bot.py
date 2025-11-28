@@ -322,25 +322,23 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
             return
 
-    cache_key = PROGRESS_MSG_KEY.format(chat_id=target_chat_id)
-    cached_msg = context.application.bot_data.get(cache_key)
-
-    if not cached_msg:
-        try:
-            await recompute_student(context.application, target_student_name)
-            cached_msg = context.application.bot_data.get(cache_key)
-            if not cached_msg:
-                raw = context.application.bot_data.get(
-                    PROGRESS_KEY.format(student=target_student_name), {}
-                )
-                cached_msg = format_missing_tasks_markdown(raw)
-        except Exception:
-            logging.exception("on_status failed for %s", target_student_name)
-            await context.bot.send_message(
-                requester_chat_id,
-                "⚠️ Failed to get progress. Please try again later."
+    # Always recompute to get fresh data (cache might be stale if MySQL was updated directly)
+    try:
+        await recompute_student(context.application, target_student_name)
+        cache_key = PROGRESS_MSG_KEY.format(chat_id=target_chat_id)
+        cached_msg = context.application.bot_data.get(cache_key)
+        if not cached_msg:
+            raw = context.application.bot_data.get(
+                PROGRESS_KEY.format(student=target_student_name), {}
             )
-            return
+            cached_msg = format_missing_tasks_markdown(raw)
+    except Exception:
+        logging.exception("on_status failed for %s", target_student_name)
+        await context.bot.send_message(
+            requester_chat_id,
+            "⚠️ Failed to get progress. Please try again later."
+        )
+        return
 
     if is_admin:
         await context.bot.send_message(
