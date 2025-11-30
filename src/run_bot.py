@@ -360,7 +360,7 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def on_hw_echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin-only: /hw_echo <username> — insert Mongo ‘add_homework_to_<username>’ echo to trigger watcher cache recompute."""
+    """Admin-only: /hw_echo <username> — insert Mongo 'add_homework_to_<username>' echo to trigger watcher cache recompute."""
     if not update.effective_chat:
         return
 
@@ -387,11 +387,58 @@ async def on_hw_echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await context.bot.send_message(chat_id, f"✅ Echo inserted for {target_student}")
 
 
+async def on_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin-only: /send <username> <message> — send a message to a specific student."""
+    if not update.effective_chat:
+        return
+
+    chat_id = update.effective_chat.id
+    try:
+        admin_id_val = int(MyBot.get_admin_id())
+    except Exception:
+        admin_id_val = None
+
+    if admin_id_val is None or chat_id != admin_id_val:
+        await context.bot.send_message(chat_id, "⛔️ Admin only.")
+        return
+
+    if not context.args or len(context.args) < 2:
+        await context.bot.send_message(chat_id, "Usage: /send <username> <message>")
+        return
+
+    target_student = _normalize_name(context.args[0])
+    if target_student not in USERS:
+        await context.bot.send_message(chat_id, f"User not found: {target_student}")
+        return
+
+    # Join all arguments after username as the message text
+    message_text = " ".join(context.args[1:])
+    
+    if not message_text.strip():
+        await context.bot.send_message(chat_id, "Message cannot be empty.")
+        return
+
+    target_chat_id = USERS.get(target_student)
+    if not target_chat_id:
+        await context.bot.send_message(chat_id, f"Chat ID not found for user: {target_student}")
+        return
+
+    try:
+        await context.bot.send_message(target_chat_id, message_text)
+        await context.bot.send_message(chat_id, f"✅ Message sent to {target_student}")
+        logging.info("Admin %s sent message to %s: %s", chat_id, target_student, message_text)
+    except Exception as e:
+        error_msg = f"Failed to send message to {target_student}: {e}"
+        await context.bot.send_message(chat_id, f"❌ {error_msg}")
+        logging.exception("Failed to send message to %s", target_student)
+
+
 # ----------------- PTB APP INIT -----------------
 async def _post_init(app):
     app.add_handler(CommandHandler(["todo", "progress", "status", "check"], on_status))
     app.add_handler(CommandHandler(["debug_admin"], debug_admin))
     app.add_handler(CommandHandler(["hw_echo"], on_hw_echo))
+    app.add_handler(CommandHandler(["send"], on_send))
 
     for student in USERS.keys():
         app.create_task(recompute_student(app, student))
