@@ -58,6 +58,22 @@ def _echo_assigned_to_mongo(target_username: str, record_date: str) -> None:
     except Exception as e:
         logging.exception("Mongo echo failed: %s", e)
 
+def _safe_int(value):
+    """Безопасно преобразует значение в int, обрабатывая строки, числа и None."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except (ValueError, AttributeError):
+            return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
+
 class DBAnalyzer:
     def __init__(self):
         pass
@@ -125,16 +141,20 @@ class DBAnalyzer:
                 assigned_raw = assigned_row[col_num + 1] or '[]'
                 try:
                     nums = json.loads(assigned_raw)
-                    assigned_tasks.setdefault(col_num + 1, set()).update(nums)
+                    # Преобразуем все значения к int для корректного сравнения
+                    nums_int = {_safe_int(n) for n in nums if _safe_int(n) is not None}
+                    assigned_tasks.setdefault(col_num + 1, set()).update(nums_int)
                 except json.JSONDecodeError:
                     continue
         
         filtered_done = filtered_df[(filtered_df['D'] > start_date) & (filtered_df['USER'] == user_name)]
         
         for _, row in filtered_done.iterrows():
-            task_num = int(row['task'])  
-            num_value = int(row['num'])  
-            done_tasks.setdefault(task_num, set()).add(num_value)
+            task_num = _safe_int(row['task'])
+            num_value = _safe_int(row['num'])
+            # Пропускаем записи с некорректными значениями
+            if task_num is not None and num_value is not None:
+                done_tasks.setdefault(task_num, set()).add(num_value)
 
         missing_tasks = {}
 
