@@ -413,6 +413,8 @@ async def on_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Join all arguments after username as the message text
     message_text = " ".join(context.args[1:])
+    # Заменяем буквальные \n на реальные переносы строк
+    message_text = message_text.replace("\\n", "\n")
     
     if not message_text.strip():
         await context.bot.send_message(chat_id, "Message cannot be empty.")
