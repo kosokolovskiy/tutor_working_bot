@@ -424,7 +424,8 @@ async def on_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        await context.bot.send_message(target_chat_id, message_text)
+        # Отправляем сообщение с поддержкой Markdown для красивого форматирования
+        await context.bot.send_message(target_chat_id, message_text, parse_mode="Markdown")
         await context.bot.send_message(chat_id, f"✅ Message sent to {target_student}")
         logging.info("Admin %s sent message to %s: %s", chat_id, target_student, message_text)
     except Exception as e:
