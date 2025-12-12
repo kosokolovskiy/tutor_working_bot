@@ -183,6 +183,36 @@ PROGRESS_BY_DATE_MSG_KEY = "progress_by_date_msg/{student}"
 STUDENTS_LIST_CACHE_KEY = "students_list_cache"
 STUDENTS_LIST_CACHE_TIMESTAMP_KEY = "students_list_cache_timestamp"
 
+async def get_cached_student_data(application, student_name: str) -> Optional[str]:
+    """
+    Получает закэшированные данные студента (без группировки по датам).
+    Если кэша нет - обновляет кэш.
+    """
+    chat_id = USERS.get(student_name)
+    if chat_id:
+        cache_key = PROGRESS_MSG_KEY.format(chat_id=chat_id)
+        cached_msg = application.bot_data.get(cache_key)
+        
+        if cached_msg:
+            logging.debug("Using cached data for student %s (without dates)", student_name)
+            return cached_msg
+    
+    # Кэша нет - получаем и кэшируем
+    try:
+        nums = await asyncio.to_thread(doneOrNot, student_name=student_name)
+        formatted_msg = format_missing_tasks_markdown(nums)
+        
+        # Кэшируем raw данные и форматированное сообщение
+        application.bot_data[PROGRESS_KEY.format(student=student_name)] = nums
+        if chat_id:
+            application.bot_data[PROGRESS_MSG_KEY.format(chat_id=chat_id)] = formatted_msg
+        
+        logging.info("Cache updated for student %s (without dates)", student_name)
+        return formatted_msg
+    except Exception as e:
+        logging.exception("Failed to get data for student %s: %s", student_name, e)
+        return None
+
 async def get_cached_student_data_by_date(application, student_name: str) -> Optional[str]:
     """
     Получает закэшированные данные студента с группировкой по датам.
@@ -192,7 +222,7 @@ async def get_cached_student_data_by_date(application, student_name: str) -> Opt
     cached_msg = application.bot_data.get(cache_key)
     
     if cached_msg:
-        logging.debug("Using cached data for student %s", student_name)
+        logging.debug("Using cached data for student %s (by date)", student_name)
         return cached_msg
     
     # Кэша нет - получаем и кэшируем
@@ -536,7 +566,7 @@ async def on_status_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обрабатывает inline query для todo_date."""
+    """Обрабатывает inline query для todo и todo_date."""
     if not update.inline_query:
         logging.warning("on_inline_query: update.inline_query is None")
         return
@@ -591,11 +621,13 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.inline_query.answer(results, cache_time=1)
         return
     
-    # Парсим запрос: "todo_date maria_24_26" или просто "todo_date"
-    # Также обрабатываем частичные запросы (когда пользователь еще печатает)
-    if not query.startswith("todo_date"):
-        # Если запрос пустой или не начинается с todo_date, возвращаем пустой результат
-        logging.debug("Inline query doesn't start with 'todo_date': %r", query)
+    # Определяем тип запроса: "todo" или "todo_date"
+    is_todo_date = query.startswith("todo_date")
+    is_todo = query.startswith("todo") and not is_todo_date
+    
+    if not (is_todo_date or is_todo):
+        # Если запрос не начинается с todo или todo_date, возвращаем пустой результат
+        logging.debug("Inline query doesn't start with 'todo' or 'todo_date': %r", query)
         await update.inline_query.answer([], cache_time=1)
         return
     
@@ -610,7 +642,7 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     title="⛔️ Доступ запрещен",
                     description="Только админ может запрашивать данные других студентов",
                     input_message_content=InputTextMessageContent(
-                        "⛔️ Только админ может запрашивать данные других студентов. Используйте `todo_date` без имени для просмотра своих заданий.",
+                        f"⛔️ Только админ может запрашивать данные других студентов. Используйте `{'todo' if is_todo else 'todo_date'}` без имени для просмотра своих заданий.",
                         parse_mode="Markdown"
                     )
                 )
@@ -655,8 +687,9 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     user_id, admin_id_from_users, is_admin, user_is_in_system, is_admin_strict)
         
         if is_admin_strict:
-            logging.info("Admin verified (user_id=%s, admin_id=%s) requested todo_date without student name, showing all students", 
-                        user_id, admin_id_from_users)
+            query_type = "todo_date" if is_todo_date else "todo"
+            logging.info("Admin verified (user_id=%s, admin_id=%s) requested %s without student name, showing all students", 
+                        user_id, admin_id_from_users, query_type)
             
             # Получаем список студентов из кэша (кэш на месяц)
             students_list = await get_cached_students_list(context.application)
@@ -681,13 +714,18 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             # Используем кэш для данных студентов
             for student_name_in_list in students_list:
                 try:
-                    # Получаем данные из кэша (или обновляем кэш если нет)
-                    formatted_msg = await get_cached_student_data_by_date(context.application, student_name_in_list)
+                    # Выбираем правильную функцию в зависимости от типа запроса
+                    if is_todo_date:
+                        formatted_msg = await get_cached_student_data_by_date(context.application, student_name_in_list)
+                        result_id_prefix = "todo_date"
+                    else:
+                        formatted_msg = await get_cached_student_data(context.application, student_name_in_list)
+                        result_id_prefix = "todo"
                     
                     if formatted_msg:
                         results.append(
                             InlineQueryResultArticle(
-                                id=f"todo_date_{student_name_in_list}",
+                                id=f"{result_id_prefix}_{student_name_in_list}",
                                 title=f"📌 ToDo: {student_name_in_list}",
                                 description=f"Показать невыполненные задания для {student_name_in_list}",
                                 input_message_content=InputTextMessageContent(
@@ -700,7 +738,7 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         # Если данные не получены, добавляем результат с ошибкой
                         results.append(
                             InlineQueryResultArticle(
-                                id=f"todo_date_{student_name_in_list}_error",
+                                id=f"{result_id_prefix}_{student_name_in_list}_error",
                                 title=f"❌ {student_name_in_list} (ошибка)",
                                 description="Не удалось получить данные",
                                 input_message_content=InputTextMessageContent(
@@ -711,10 +749,11 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         )
                 except Exception as e:
                     logging.warning("Failed to get cached data for student %s in inline query: %s", student_name_in_list, e)
+                    result_id_prefix = "todo_date" if is_todo_date else "todo"
                     # Добавляем результат с ошибкой
                     results.append(
                         InlineQueryResultArticle(
-                            id=f"todo_date_{student_name_in_list}_error",
+                            id=f"{result_id_prefix}_{student_name_in_list}_error",
                             title=f"❌ {student_name_in_list} (ошибка)",
                             description="Не удалось получить данные",
                             input_message_content=InputTextMessageContent(
@@ -743,8 +782,9 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         # Если не админ - показываем только свои данные
         # Дополнительная проверка: если пользователь не админ, не показываем список всех студентов
+        query_type = "todo_date" if is_todo_date else "todo"
         if not is_admin:
-            logging.info("Non-admin user (user_id=%s) requested todo_date without name, showing only their own data", user_id)
+            logging.info("Non-admin user (user_id=%s) requested %s without name, showing only their own data", user_id, query_type)
         
         # Используем ID текущего пользователя для получения его собственных данных
         student_name = chat_id_to_student(user_id)
@@ -767,8 +807,17 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     # Получаем данные о заданиях из кэша
     try:
-        logging.info("Processing inline query for student: %s", student_name)
-        formatted_msg = await get_cached_student_data_by_date(context.application, student_name)
+        logging.info("Processing inline query for student: %s (type=%s)", student_name, "todo_date" if is_todo_date else "todo")
+        
+        # Выбираем правильную функцию в зависимости от типа запроса
+        if is_todo_date:
+            formatted_msg = await get_cached_student_data_by_date(context.application, student_name)
+            result_id_prefix = "todo_date"
+            title_prefix = "📌 ToDo по датам:"
+        else:
+            formatted_msg = await get_cached_student_data(context.application, student_name)
+            result_id_prefix = "todo"
+            title_prefix = "📌 ToDo:"
         
         if not formatted_msg:
             raise Exception("Failed to get cached data")
@@ -776,8 +825,8 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Создаем результат для inline query
         results = [
             InlineQueryResultArticle(
-                id=f"todo_date_{student_name}",
-                title=f"📌 ToDo по датам: {student_name}",
+                id=f"{result_id_prefix}_{student_name}",
+                title=f"{title_prefix} {student_name}",
                 description=f"Показать невыполненные задания для {student_name}",
                 input_message_content=InputTextMessageContent(
                     formatted_msg,
@@ -790,7 +839,7 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.inline_query.answer(results, cache_time=300)
         logging.info("Inline query results sent successfully")
     except Exception as e:
-        logging.exception("Error in inline query for todo_date: %s", e)
+        logging.exception("Error in inline query for %s: %s", "todo_date" if is_todo_date else "todo", e)
         results = [
             InlineQueryResultArticle(
                 id="error",
