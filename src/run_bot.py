@@ -542,19 +542,11 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     query = update.inline_query.query.strip() if update.inline_query.query else ""
-    logging.info("Inline query received from user %s: %r", update.inline_query.from_user.id, query)
-    
-    # Парсим запрос: "todo_date maria_24_26" или просто "todo_date"
-    # Также обрабатываем частичные запросы (когда пользователь еще печатает)
-    if not query.startswith("todo_date"):
-        # Если запрос пустой или не начинается с todo_date, возвращаем пустой результат
-        logging.debug("Inline query doesn't start with 'todo_date': %r", query)
-        await update.inline_query.answer([], cache_time=1)
-        return
     
     # Получаем ID пользователя, который делает запрос
     user_id = update.inline_query.from_user.id
     
+    # ВАЖНО: Проверка безопасности ДО обработки запроса!
     # Проверяем, является ли пользователь админом
     try:
         admin_id_val = int(MyBot.get_admin_id())
@@ -564,15 +556,27 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     is_admin = (admin_id_val is not None and user_id == admin_id_val)
     
     # Дополнительная проверка безопасности: пользователь должен быть в словаре USERS
-    user_is_in_system = any(int(cid) == user_id for cid in USERS.values() if cid)
+    # Более строгая проверка с преобразованием всех значений к int
+    user_is_in_system = False
+    try:
+        for name, cid in USERS.items():
+            try:
+                if int(cid) == user_id:
+                    user_is_in_system = True
+                    break
+            except (ValueError, TypeError):
+                continue
+    except Exception as e:
+        logging.error("Error checking user_is_in_system: %s", e)
+        user_is_in_system = False
     
     # Логируем для отладки
-    logging.info("Inline query security check: user_id=%s, admin_id_val=%s, is_admin=%s, user_is_in_system=%s", 
-                 user_id, admin_id_val, is_admin, user_is_in_system)
+    logging.info("Inline query received from user %s: %r (is_admin=%s, in_system=%s)", 
+                 user_id, query, is_admin, user_is_in_system)
     
-    # Если пользователь не в системе - сразу блокируем доступ
+    # Если пользователь не в системе - сразу блокируем доступ для ЛЮБОГО запроса
     if not user_is_in_system:
-        logging.warning("Unauthorized inline query attempt from user_id=%s (not in USERS dict)", user_id)
+        logging.warning("Unauthorized inline query attempt from user_id=%s (not in USERS dict), query=%r", user_id, query)
         results = [
             InlineQueryResultArticle(
                 id="unauthorized",
@@ -585,6 +589,14 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
         ]
         await update.inline_query.answer(results, cache_time=1)
+        return
+    
+    # Парсим запрос: "todo_date maria_24_26" или просто "todo_date"
+    # Также обрабатываем частичные запросы (когда пользователь еще печатает)
+    if not query.startswith("todo_date"):
+        # Если запрос пустой или не начинается с todo_date, возвращаем пустой результат
+        logging.debug("Inline query doesn't start with 'todo_date': %r", query)
+        await update.inline_query.answer([], cache_time=1)
         return
     
     # Извлекаем имя студента из запроса
@@ -625,9 +637,26 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
     else:
         # Имя не указано
-        # Если админ - показываем список всех студентов
-        if is_admin:
-            logging.info("Admin requested todo_date without student name, showing all students")
+        # ВАЖНО: Список студентов показываем ТОЛЬКО админу!
+        # Дополнительная проверка безопасности перед показом списка
+        # Проверяем еще раз, что пользователь точно админ из словаря USERS
+        admin_id_from_users = None
+        try:
+            admin_id_from_users = int(USERS.get("admin", 0))
+        except (ValueError, TypeError):
+            admin_id_from_users = None
+        
+        # Строгая проверка: пользователь должен быть админом И быть в системе
+        is_admin_strict = (admin_id_from_users is not None and 
+                          user_id == admin_id_from_users and 
+                          user_is_in_system)
+        
+        logging.info("Security check for student list: user_id=%s, admin_id_from_users=%s, is_admin=%s, user_is_in_system=%s, is_admin_strict=%s",
+                    user_id, admin_id_from_users, is_admin, user_is_in_system, is_admin_strict)
+        
+        if is_admin_strict:
+            logging.info("Admin verified (user_id=%s, admin_id=%s) requested todo_date without student name, showing all students", 
+                        user_id, admin_id_from_users)
             
             # Получаем список студентов из кэша (кэш на месяц)
             students_list = await get_cached_students_list(context.application)
@@ -712,7 +741,12 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.inline_query.answer(results, cache_time=300)
             return
         
-        # Если не админ - используем ID текущего пользователя
+        # Если не админ - показываем только свои данные
+        # Дополнительная проверка: если пользователь не админ, не показываем список всех студентов
+        if not is_admin:
+            logging.info("Non-admin user (user_id=%s) requested todo_date without name, showing only their own data", user_id)
+        
+        # Используем ID текущего пользователя для получения его собственных данных
         student_name = chat_id_to_student(user_id)
         if not student_name:
             # Если не нашли студента в словаре - это чужой пользователь
