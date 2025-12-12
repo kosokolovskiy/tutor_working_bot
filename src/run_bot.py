@@ -585,12 +585,16 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def on_chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обрабатывает выбор результата inline query - отправляет сообщение админу, если это студент."""
     if not update.chosen_inline_result:
+        logging.warning("on_chosen_inline_result: update.chosen_inline_result is None")
         return
     
     result_id = update.chosen_inline_result.result_id
+    user_id = update.chosen_inline_result.from_user.id
+    logging.info("Chosen inline result: result_id=%r, user_id=%s", result_id, user_id)
     
     # Проверяем, что это результат todo_date
     if not result_id.startswith("todo_date_"):
+        logging.debug("Chosen inline result doesn't start with 'todo_date_': %r", result_id)
         return
     
     # Извлекаем имя студента из result_id
@@ -610,6 +614,7 @@ async def on_chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_
     # Если это не админ (т.е. обычный студент), отправляем сообщение админу
     if not is_admin and admin_id_val:
         try:
+            logging.info("Sending inline query result to admin for student %s (user_id=%s)", student_name, user_id)
             # Получаем данные для отправки админу
             nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=student_name)
             formatted_msg = format_missing_tasks_by_date_markdown(nums_by_date)
@@ -619,9 +624,11 @@ async def on_chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_
             
             # Отправляем сообщение админу
             await context.bot.send_message(admin_id_val, admin_msg, parse_mode="Markdown")
-            logging.info("Sent inline query result to admin for student %s", student_name)
+            logging.info("Successfully sent inline query result to admin for student %s", student_name)
         except Exception as e:
             logging.exception("Failed to send inline query result to admin for %s: %s", student_name, e)
+    else:
+        logging.info("Skipping admin notification: is_admin=%s, admin_id_val=%s", is_admin, admin_id_val)
 
 
 async def on_hw_echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
