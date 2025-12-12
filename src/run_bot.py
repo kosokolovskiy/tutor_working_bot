@@ -465,12 +465,18 @@ async def on_status_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обрабатывает inline query для todo_date."""
     if not update.inline_query:
+        logging.warning("on_inline_query: update.inline_query is None")
         return
     
-    query = update.inline_query.query.strip()
+    query = update.inline_query.query.strip() if update.inline_query.query else ""
+    logging.info("Inline query received from user %s: %r", update.inline_query.from_user.id, query)
     
     # Парсим запрос: "todo_date maria_24_26" или просто "todo_date"
+    # Также обрабатываем частичные запросы (когда пользователь еще печатает)
     if not query.startswith("todo_date"):
+        # Если запрос пустой или не начинается с todo_date, возвращаем пустой результат
+        logging.debug("Inline query doesn't start with 'todo_date': %r", query)
+        await update.inline_query.answer([], cache_time=1)
         return
     
     # Получаем ID пользователя, который делает запрос
@@ -541,6 +547,7 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     # Получаем данные о заданиях
     try:
+        logging.info("Processing inline query for student: %s", student_name)
         nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=student_name)
         formatted_msg = format_missing_tasks_by_date_markdown(nums_by_date)
         
@@ -557,7 +564,9 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
         ]
         
+        logging.info("Sending inline query results for student: %s", student_name)
         await update.inline_query.answer(results, cache_time=5)
+        logging.info("Inline query results sent successfully")
     except Exception as e:
         logging.exception("Error in inline query for todo_date: %s", e)
         results = [
