@@ -138,7 +138,7 @@ def format_missing_tasks_by_date_markdown(missing_tasks_by_date: Dict[str, Dict[
         
         for task, nums in sorted(tasks_for_date.items()):
             nums_str = ", ".join(map(str, nums))
-            message += f"  • *Task {task}:* `{nums_str}`\n"
+            message += f"  • *Task {task}:* `{nums_str}`\n\n"
         
         message += "\n"
     
