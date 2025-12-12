@@ -527,7 +527,65 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.inline_query.answer(results, cache_time=1)
             return
     else:
-        # Имя не указано - используем ID текущего пользователя
+        # Имя не указано
+        # Если админ - показываем список всех студентов
+        if is_admin:
+            logging.info("Admin requested todo_date without student name, showing all students")
+            results = []
+            
+            # Создаем результат для каждого студента (кроме admin)
+            for student_name_in_list in sorted(USERS.keys()):
+                if student_name_in_list == "admin":
+                    continue
+                
+                try:
+                    # Получаем данные для каждого студента
+                    nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=student_name_in_list)
+                    formatted_msg = format_missing_tasks_by_date_markdown(nums_by_date)
+                    
+                    results.append(
+                        InlineQueryResultArticle(
+                            id=f"todo_date_{student_name_in_list}",
+                            title=f"📌 ToDo: {student_name_in_list}",
+                            description=f"Показать невыполненные задания для {student_name_in_list}",
+                            input_message_content=InputTextMessageContent(
+                                formatted_msg,
+                                parse_mode="Markdown"
+                            )
+                        )
+                    )
+                except Exception as e:
+                    logging.warning("Failed to get data for student %s in inline query: %s", student_name_in_list, e)
+                    # Добавляем результат с ошибкой
+                    results.append(
+                        InlineQueryResultArticle(
+                            id=f"todo_date_{student_name_in_list}_error",
+                            title=f"❌ {student_name_in_list} (ошибка)",
+                            description="Не удалось получить данные",
+                            input_message_content=InputTextMessageContent(
+                                f"⚠️ Не удалось получить данные для `{student_name_in_list}`",
+                                parse_mode="Markdown"
+                            )
+                        )
+                    )
+            
+            if not results:
+                results = [
+                    InlineQueryResultArticle(
+                        id="no_students",
+                        title="❌ Нет доступных студентов",
+                        description="В системе нет зарегистрированных студентов",
+                        input_message_content=InputTextMessageContent(
+                            "❌ В системе нет зарегистрированных студентов",
+                            parse_mode="Markdown"
+                        )
+                    )
+                ]
+            
+            await update.inline_query.answer(results, cache_time=5)
+            return
+        
+        # Если не админ - используем ID текущего пользователя
         student_name = chat_id_to_student(user_id)
         if not student_name:
             # Если не нашли студента в словаре, показываем сообщение об ошибке
