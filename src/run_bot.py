@@ -6,15 +6,15 @@ import re
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from telegram import Update
-from telegram.ext import ContextTypes, CommandHandler
+from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
+from telegram.ext import ContextTypes, CommandHandler, InlineQueryHandler, ChosenInlineResultHandler
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import BSON
 
 from get_creds import get_creds
 from kosokolovsky_telegram_bot import MyBot
-from main import doneOrNot, doneOrNotWithDates, doneOrNotWithDates
+from main import doneOrNot, doneOrNotWithDates
 
 # ----------------- LOGGING -----------------
 log_dir = os.path.join(os.getcwd(), "logs")
@@ -462,6 +462,159 @@ async def on_status_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await context.bot.send_message(chat_id, formatted_msg, parse_mode="Markdown")
 
 
+async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обрабатывает inline query для todo_date."""
+    if not update.inline_query:
+        return
+    
+    query = update.inline_query.query.strip()
+    
+    # Парсим запрос: "todo_date maria_24_26" или просто "todo_date"
+    if not query.startswith("todo_date"):
+        return
+    
+    # Получаем ID пользователя, который делает запрос
+    user_id = update.inline_query.from_user.id
+    
+    # Проверяем, является ли пользователь админом
+    try:
+        admin_id_val = int(MyBot.get_admin_id())
+    except Exception:
+        admin_id_val = None
+    
+    is_admin = (admin_id_val is not None and user_id == admin_id_val)
+    
+    # Извлекаем имя студента из запроса
+    parts = query.split(maxsplit=1)
+    if len(parts) > 1:
+        # Имя студента указано - проверяем права админа
+        if not is_admin:
+            results = [
+                InlineQueryResultArticle(
+                    id="not_admin",
+                    title="⛔️ Доступ запрещен",
+                    description="Только админ может запрашивать данные других студентов",
+                    input_message_content=InputTextMessageContent(
+                        "⛔️ Только админ может запрашивать данные других студентов. Используйте `todo_date` без имени для просмотра своих заданий.",
+                        parse_mode="Markdown"
+                    )
+                )
+            ]
+            await update.inline_query.answer(results, cache_time=1)
+            return
+        
+        student_name = _normalize_name(parts[1])
+        
+        # Проверяем, существует ли студент
+        if student_name not in USERS:
+            results = [
+                InlineQueryResultArticle(
+                    id="not_found",
+                    title=f"❌ Студент '{student_name}' не найден",
+                    description="Проверьте правильность имени",
+                    input_message_content=InputTextMessageContent(
+                        f"❌ Студент `{student_name}` не найден",
+                        parse_mode="Markdown"
+                    )
+                )
+            ]
+            await update.inline_query.answer(results, cache_time=1)
+            return
+    else:
+        # Имя не указано - используем ID текущего пользователя
+        student_name = chat_id_to_student(user_id)
+        if not student_name:
+            # Если не нашли студента в словаре, показываем сообщение об ошибке
+            results = [
+                InlineQueryResultArticle(
+                    id="not_found_user",
+                    title="❌ Вы не найдены в системе",
+                    description="Ваш ID не найден в базе данных",
+                    input_message_content=InputTextMessageContent(
+                        "❌ Ваш ID не найден в системе. Обратитесь к администратору.",
+                        parse_mode="Markdown"
+                    )
+                )
+            ]
+            await update.inline_query.answer(results, cache_time=1)
+            return
+    
+    # Получаем данные о заданиях
+    try:
+        nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=student_name)
+        formatted_msg = format_missing_tasks_by_date_markdown(nums_by_date)
+        
+        # Создаем результат для inline query
+        results = [
+            InlineQueryResultArticle(
+                id=f"todo_date_{student_name}",
+                title=f"📌 ToDo по датам: {student_name}",
+                description=f"Показать невыполненные задания для {student_name}",
+                input_message_content=InputTextMessageContent(
+                    formatted_msg,
+                    parse_mode="Markdown"
+                )
+            )
+        ]
+        
+        await update.inline_query.answer(results, cache_time=5)
+    except Exception as e:
+        logging.exception("Error in inline query for todo_date: %s", e)
+        results = [
+            InlineQueryResultArticle(
+                id="error",
+                title="❌ Ошибка при получении данных",
+                description="Попробуйте позже",
+                input_message_content=InputTextMessageContent(
+                    "⚠️ Произошла ошибка при получении данных. Попробуйте позже."
+                )
+            )
+        ]
+        await update.inline_query.answer(results, cache_time=1)
+
+
+async def on_chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обрабатывает выбор результата inline query - отправляет сообщение админу, если это студент."""
+    if not update.chosen_inline_result:
+        return
+    
+    result_id = update.chosen_inline_result.result_id
+    
+    # Проверяем, что это результат todo_date
+    if not result_id.startswith("todo_date_"):
+        return
+    
+    # Извлекаем имя студента из result_id
+    student_name = result_id.replace("todo_date_", "")
+    
+    # Получаем ID пользователя, который выбрал результат
+    user_id = update.chosen_inline_result.from_user.id
+    
+    # Проверяем, является ли пользователь админом
+    try:
+        admin_id_val = int(MyBot.get_admin_id())
+    except Exception:
+        admin_id_val = None
+    
+    is_admin = (admin_id_val is not None and user_id == admin_id_val)
+    
+    # Если это не админ (т.е. обычный студент), отправляем сообщение админу
+    if not is_admin and admin_id_val:
+        try:
+            # Получаем данные для отправки админу
+            nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=student_name)
+            formatted_msg = format_missing_tasks_by_date_markdown(nums_by_date)
+            
+            # Формируем сообщение для админа с указанием студента
+            admin_msg = f"👤 *Student:* `{student_name}`\n\n{formatted_msg}"
+            
+            # Отправляем сообщение админу
+            await context.bot.send_message(admin_id_val, admin_msg, parse_mode="Markdown")
+            logging.info("Sent inline query result to admin for student %s", student_name)
+        except Exception as e:
+            logging.exception("Failed to send inline query result to admin for %s: %s", student_name, e)
+
+
 async def on_hw_echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin-only: /hw_echo <username> — insert Mongo 'add_homework_to_<username>' echo to trigger watcher cache recompute."""
     if not update.effective_chat:
@@ -543,6 +696,8 @@ async def on_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def _post_init(app):
     app.add_handler(CommandHandler(["todo", "progress", "status", "check"], on_status))
     app.add_handler(CommandHandler(["todo_date", "progress_date", "status_date", "check_date"], on_status_date))
+    app.add_handler(InlineQueryHandler(on_inline_query))
+    app.add_handler(ChosenInlineResultHandler(on_chosen_inline_result))
     app.add_handler(CommandHandler(["debug_admin"], debug_admin))
     app.add_handler(CommandHandler(["hw_echo"], on_hw_echo))
     app.add_handler(CommandHandler(["send"], on_send))
