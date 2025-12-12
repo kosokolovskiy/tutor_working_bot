@@ -174,8 +174,70 @@ def _load_resume_token() -> Optional[Dict[str, Any]]:
 # application.bot_data will hold two views:
 #   progress/<student_name>  -> raw dict from doneOrNot
 #   progress_msg/<chat_id>   -> preformatted Markdown message
+#   progress_by_date/<student_name>  -> raw dict from doneOrNotWithDates
+#   progress_by_date_msg/<student_name>  -> formatted markdown message
 PROGRESS_KEY = "progress/{student}"
 PROGRESS_MSG_KEY = "progress_msg/{chat_id}"
+PROGRESS_BY_DATE_KEY = "progress_by_date/{student}"
+PROGRESS_BY_DATE_MSG_KEY = "progress_by_date_msg/{student}"
+STUDENTS_LIST_CACHE_KEY = "students_list_cache"
+STUDENTS_LIST_CACHE_TIMESTAMP_KEY = "students_list_cache_timestamp"
+
+async def get_cached_student_data_by_date(application, student_name: str) -> Optional[str]:
+    """
+    Получает закэшированные данные студента с группировкой по датам.
+    Если кэша нет - обновляет кэш.
+    """
+    cache_key = PROGRESS_BY_DATE_MSG_KEY.format(student=student_name)
+    cached_msg = application.bot_data.get(cache_key)
+    
+    if cached_msg:
+        logging.debug("Using cached data for student %s", student_name)
+        return cached_msg
+    
+    # Кэша нет - получаем и кэшируем
+    try:
+        nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=student_name)
+        formatted_msg = format_missing_tasks_by_date_markdown(nums_by_date)
+        
+        # Кэшируем оба варианта: raw данные и форматированное сообщение
+        application.bot_data[PROGRESS_BY_DATE_KEY.format(student=student_name)] = nums_by_date
+        application.bot_data[PROGRESS_BY_DATE_MSG_KEY.format(student=student_name)] = formatted_msg
+        
+        logging.info("Cache updated for student %s (by date)", student_name)
+        return formatted_msg
+    except Exception as e:
+        logging.exception("Failed to get data for student %s: %s", student_name, e)
+        return None
+
+async def get_cached_students_list(application) -> Optional[list]:
+    """
+    Получает закэшированный список студентов для админа.
+    Кэш обновляется раз в месяц (или если его нет).
+    """
+    # Проверяем кэш
+    cached_list = application.bot_data.get(STUDENTS_LIST_CACHE_KEY)
+    cache_timestamp = application.bot_data.get(STUDENTS_LIST_CACHE_TIMESTAMP_KEY, 0)
+    
+    # Кэш на месяц (30 дней = 2592000 секунд)
+    MONTH_IN_SECONDS = 30 * 24 * 60 * 60
+    current_time = asyncio.get_running_loop().time()
+    
+    if cached_list and (current_time - cache_timestamp) < MONTH_IN_SECONDS:
+        logging.debug("Using cached students list (age: %.0f days)", (current_time - cache_timestamp) / 86400)
+        return cached_list
+    
+    # Кэша нет или он устарел - создаем новый
+    students_list = []
+    for student_name in sorted(USERS.keys()):
+        if student_name != "admin":
+            students_list.append(student_name)
+    
+    application.bot_data[STUDENTS_LIST_CACHE_KEY] = students_list
+    application.bot_data[STUDENTS_LIST_CACHE_TIMESTAMP_KEY] = current_time
+    
+    logging.info("Students list cache updated (%d students)", len(students_list))
+    return students_list
 
 async def recompute_student(application, student_name: str) -> None:
     """
@@ -531,31 +593,60 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Если админ - показываем список всех студентов
         if is_admin:
             logging.info("Admin requested todo_date without student name, showing all students")
-            results = []
             
-            # Создаем результат для каждого студента (кроме admin)
-            for student_name_in_list in sorted(USERS.keys()):
-                if student_name_in_list == "admin":
-                    continue
-                
-                try:
-                    # Получаем данные для каждого студента
-                    nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=student_name_in_list)
-                    formatted_msg = format_missing_tasks_by_date_markdown(nums_by_date)
-                    
-                    results.append(
-                        InlineQueryResultArticle(
-                            id=f"todo_date_{student_name_in_list}",
-                            title=f"📌 ToDo: {student_name_in_list}",
-                            description=f"Показать невыполненные задания для {student_name_in_list}",
-                            input_message_content=InputTextMessageContent(
-                                formatted_msg,
-                                parse_mode="Markdown"
-                            )
+            # Получаем список студентов из кэша (кэш на месяц)
+            students_list = await get_cached_students_list(context.application)
+            
+            if not students_list:
+                results = [
+                    InlineQueryResultArticle(
+                        id="no_students",
+                        title="❌ Нет доступных студентов",
+                        description="В системе нет зарегистрированных студентов",
+                        input_message_content=InputTextMessageContent(
+                            "❌ В системе нет зарегистрированных студентов",
+                            parse_mode="Markdown"
                         )
                     )
+                ]
+                await update.inline_query.answer(results, cache_time=5)
+                return
+            
+            results = []
+            
+            # Используем кэш для данных студентов
+            for student_name_in_list in students_list:
+                try:
+                    # Получаем данные из кэша (или обновляем кэш если нет)
+                    formatted_msg = await get_cached_student_data_by_date(context.application, student_name_in_list)
+                    
+                    if formatted_msg:
+                        results.append(
+                            InlineQueryResultArticle(
+                                id=f"todo_date_{student_name_in_list}",
+                                title=f"📌 ToDo: {student_name_in_list}",
+                                description=f"Показать невыполненные задания для {student_name_in_list}",
+                                input_message_content=InputTextMessageContent(
+                                    formatted_msg,
+                                    parse_mode="Markdown"
+                                )
+                            )
+                        )
+                    else:
+                        # Если данные не получены, добавляем результат с ошибкой
+                        results.append(
+                            InlineQueryResultArticle(
+                                id=f"todo_date_{student_name_in_list}_error",
+                                title=f"❌ {student_name_in_list} (ошибка)",
+                                description="Не удалось получить данные",
+                                input_message_content=InputTextMessageContent(
+                                    f"⚠️ Не удалось получить данные для `{student_name_in_list}`",
+                                    parse_mode="Markdown"
+                                )
+                            )
+                        )
                 except Exception as e:
-                    logging.warning("Failed to get data for student %s in inline query: %s", student_name_in_list, e)
+                    logging.warning("Failed to get cached data for student %s in inline query: %s", student_name_in_list, e)
                     # Добавляем результат с ошибкой
                     results.append(
                         InlineQueryResultArticle(
@@ -582,7 +673,8 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     )
                 ]
             
-            await update.inline_query.answer(results, cache_time=5)
+            # Кэш Telegram на максимальное время (чтобы снизить нагрузку)
+            await update.inline_query.answer(results, cache_time=300)
             return
         
         # Если не админ - используем ID текущего пользователя
@@ -603,11 +695,13 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.inline_query.answer(results, cache_time=1)
             return
     
-    # Получаем данные о заданиях
+    # Получаем данные о заданиях из кэша
     try:
         logging.info("Processing inline query for student: %s", student_name)
-        nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=student_name)
-        formatted_msg = format_missing_tasks_by_date_markdown(nums_by_date)
+        formatted_msg = await get_cached_student_data_by_date(context.application, student_name)
+        
+        if not formatted_msg:
+            raise Exception("Failed to get cached data")
         
         # Создаем результат для inline query
         results = [
@@ -623,7 +717,7 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ]
         
         logging.info("Sending inline query results for student: %s", student_name)
-        await update.inline_query.answer(results, cache_time=5)
+        await update.inline_query.answer(results, cache_time=300)
         logging.info("Inline query results sent successfully")
     except Exception as e:
         logging.exception("Error in inline query for todo_date: %s", e)
