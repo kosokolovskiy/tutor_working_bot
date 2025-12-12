@@ -243,9 +243,10 @@ async def recompute_student(application, student_name: str) -> None:
     """
     Recompute a student's progress and update the cache.
     No messages are sent here; only cache gets updated.
+    Обновляет кэш для обоих форматов: обычный и с группировкой по датам.
     """
     try:
-        # doneOrNot is blocking → run it in a thread pool
+        # Обновляем обычный кэш (doneOrNot)
         nums = await asyncio.to_thread(doneOrNot, student_name=student_name)
         application.bot_data[PROGRESS_KEY.format(student=student_name)] = nums
 
@@ -254,7 +255,17 @@ async def recompute_student(application, student_name: str) -> None:
             msg = format_missing_tasks_markdown(nums)
             application.bot_data[PROGRESS_MSG_KEY.format(chat_id=chat_id)] = msg
 
-        logging.info("Cache updated for %s", student_name)
+        # Обновляем кэш с группировкой по датам (doneOrNotWithDates)
+        try:
+            nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=student_name)
+            formatted_msg_by_date = format_missing_tasks_by_date_markdown(nums_by_date)
+            
+            application.bot_data[PROGRESS_BY_DATE_KEY.format(student=student_name)] = nums_by_date
+            application.bot_data[PROGRESS_BY_DATE_MSG_KEY.format(student=student_name)] = formatted_msg_by_date
+        except Exception as e:
+            logging.warning("Failed to update by-date cache for %s: %s", student_name, e)
+
+        logging.info("Cache updated for %s (both formats)", student_name)
     except Exception:
         logging.exception("Failed to recompute for %s", student_name)
 
@@ -552,6 +563,30 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     is_admin = (admin_id_val is not None and user_id == admin_id_val)
     
+    # Дополнительная проверка безопасности: пользователь должен быть в словаре USERS
+    user_is_in_system = any(int(cid) == user_id for cid in USERS.values() if cid)
+    
+    # Логируем для отладки
+    logging.info("Inline query security check: user_id=%s, admin_id_val=%s, is_admin=%s, user_is_in_system=%s", 
+                 user_id, admin_id_val, is_admin, user_is_in_system)
+    
+    # Если пользователь не в системе - сразу блокируем доступ
+    if not user_is_in_system:
+        logging.warning("Unauthorized inline query attempt from user_id=%s (not in USERS dict)", user_id)
+        results = [
+            InlineQueryResultArticle(
+                id="unauthorized",
+                title="⛔️ Доступ запрещен",
+                description="Ваш ID не найден в системе",
+                input_message_content=InputTextMessageContent(
+                    "⛔️ У вас нет доступа к этому боту. Обратитесь к администратору.",
+                    parse_mode="Markdown"
+                )
+            )
+        ]
+        await update.inline_query.answer(results, cache_time=1)
+        return
+    
     # Извлекаем имя студента из запроса
     parts = query.split(maxsplit=1)
     if len(parts) > 1:
@@ -680,14 +715,15 @@ async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Если не админ - используем ID текущего пользователя
         student_name = chat_id_to_student(user_id)
         if not student_name:
-            # Если не нашли студента в словаре, показываем сообщение об ошибке
+            # Если не нашли студента в словаре - это чужой пользователь
+            logging.warning("Unauthorized inline query attempt from user_id=%s (not in USERS dict)", user_id)
             results = [
                 InlineQueryResultArticle(
-                    id="not_found_user",
-                    title="❌ Вы не найдены в системе",
-                    description="Ваш ID не найден в базе данных",
+                    id="unauthorized",
+                    title="⛔️ Доступ запрещен",
+                    description="Ваш ID не найден в системе",
                     input_message_content=InputTextMessageContent(
-                        "❌ Ваш ID не найден в системе. Обратитесь к администратору.",
+                        "⛔️ У вас нет доступа к этому боту. Обратитесь к администратору.",
                         parse_mode="Markdown"
                     )
                 )
