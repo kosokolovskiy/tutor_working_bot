@@ -112,6 +112,18 @@ class DBAnalyzer:
 
         return nums
 
+    def findNotDoneWithDates(self, student_name):
+        """Возвращает невыполненные задания, сгруппированные по датам."""
+        print('Start of Search with Dates...')
+        obj = DBAnalyzer()
+        filtered_df = obj._get_mongo_df(student_name)
+
+        with SQLConnector(dbname, username, password, rds_endpoint) as sql_conn:
+            nums_by_date = obj._compare_assigned_done_with_dates(sql_conn, student_name, filtered_df)
+            print('Search with Dates is successful!')
+
+        return nums_by_date
+
     def _get_mongo_df(self, username):
         stats = MongoConnector()
         df = stats.df
@@ -165,3 +177,73 @@ class DBAnalyzer:
 
         print(f"Missing tasks for {user_name} since {start_date}: {missing_tasks}")
         return missing_tasks
+
+    def _compare_assigned_done_with_dates(self, sql_connector, user_name, filtered_df, days_back=350):
+        """Сравнивает назначенные и выполненные задания, группируя по датам."""
+        start_date = (datetime.now() - timedelta(days=days_back)).date().strftime('%Y-%m-%d')
+
+        query_assigned = "SELECT * FROM assigned WHERE date > %s AND name = %s ORDER BY date"
+        sql_connector.cursor.execute(query_assigned, (start_date, user_name))
+        assigned_results = sql_connector.cursor.fetchall()
+
+        if not assigned_results:
+            print("No assigned tasks found for this period and user.")
+            return {}
+
+        # Структура: {date: {task_num: set(nums)}}
+        assigned_tasks_by_date = {}
+        done_tasks = {}
+
+        # Собираем назначенные задания по датам
+        for assigned_row in assigned_results:
+            record_date = assigned_row[0]  # Первый столбец - это date
+            if record_date is None:
+                continue
+            
+            # Преобразуем date в строку, если это не строка
+            if isinstance(record_date, datetime):
+                date_str = record_date.strftime('%Y-%m-%d')
+            elif isinstance(record_date, date):
+                date_str = record_date.strftime('%Y-%m-%d')
+            else:
+                date_str = str(record_date)
+            
+            if date_str not in assigned_tasks_by_date:
+                assigned_tasks_by_date[date_str] = {}
+            
+            for col_num in range(1, 28):
+                assigned_raw = assigned_row[col_num + 1] or '[]'
+                try:
+                    nums = json.loads(assigned_raw)
+                    # Преобразуем все значения к int для корректного сравнения
+                    nums_int = {_safe_int(n) for n in nums if _safe_int(n) is not None}
+                    if nums_int:
+                        assigned_tasks_by_date[date_str].setdefault(col_num + 1, set()).update(nums_int)
+                except json.JSONDecodeError:
+                    continue
+        
+        # Собираем выполненные задания
+        filtered_done = filtered_df[(filtered_df['D'] > start_date) & (filtered_df['USER'] == user_name)]
+        
+        for _, row in filtered_done.iterrows():
+            task_num = _safe_int(row['task'])
+            num_value = _safe_int(row['num'])
+            # Пропускаем записи с некорректными значениями
+            if task_num is not None and num_value is not None:
+                done_tasks.setdefault(task_num, set()).add(num_value)
+
+        # Находим невыполненные задания, группируя по датам
+        missing_tasks_by_date = {}
+
+        for date_str, tasks_for_date in assigned_tasks_by_date.items():
+            missing_for_date = {}
+            for col_num, assigned_nums in tasks_for_date.items():
+                missing = assigned_nums - done_tasks.get(col_num, set())
+                if missing:
+                    missing_for_date[col_num] = sorted(missing)
+            
+            if missing_for_date:
+                missing_tasks_by_date[date_str] = missing_for_date
+
+        print(f"Missing tasks by date for {user_name} since {start_date}: {missing_tasks_by_date}")
+        return missing_tasks_by_date

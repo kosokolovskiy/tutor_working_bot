@@ -14,7 +14,7 @@ from bson import BSON
 
 from get_creds import get_creds
 from kosokolovsky_telegram_bot import MyBot
-from main import doneOrNot
+from main import doneOrNot, doneOrNotWithDates, doneOrNotWithDates
 
 # ----------------- LOGGING -----------------
 log_dir = os.path.join(os.getcwd(), "logs")
@@ -120,6 +120,28 @@ def format_missing_tasks_markdown(missing_tasks: Dict[int, Any]) -> str:
     for task, nums in missing_tasks.items():
         nums_str = ", ".join(map(str, nums))
         message += f"• *Task {task}:* \n\t`{nums_str}`\n\n"
+    return message
+
+def format_missing_tasks_by_date_markdown(missing_tasks_by_date: Dict[str, Dict[int, Any]]) -> str:
+    """Format result of doneOrNotWithDates into a Markdown message grouped by dates."""
+    if not missing_tasks_by_date:
+        return "✅ All is done. Enjoy the moment!"
+    
+    message = "*📌 ToDo по датам:*\n\n"
+    
+    # Сортируем даты для красивого отображения
+    sorted_dates = sorted(missing_tasks_by_date.keys(), reverse=True)
+    
+    for date_str in sorted_dates:
+        tasks_for_date = missing_tasks_by_date[date_str]
+        message += f"📅 *{date_str}:*\n\n"
+        
+        for task, nums in sorted(tasks_for_date.items()):
+            nums_str = ", ".join(map(str, nums))
+            message += f"  • *Task {task}:* `{nums_str}`\n"
+        
+        message += "\n"
+    
     return message
 
 def chat_id_to_student(chat_id: int) -> Optional[str]:
@@ -359,6 +381,87 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await context.bot.send_message(chat_id, cached_msg, parse_mode="Markdown")
 
 
+async def on_status_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /todo_date, /progress_date, /status_date, /check_date
+    - non-admin: returns their own missing HW grouped by dates (args ignored) and sends a copy to admin
+    - admin:
+        * with arg: returns that student's missing HW grouped by dates (only to admin)
+        * without arg: returns their own (only to admin)
+    """
+    if not update.effective_chat:
+        return
+
+    requester_chat_id = update.effective_chat.id
+
+    try:
+        admin_id_val = int(MyBot.get_admin_id())
+    except Exception as e:
+        logging.warning("get_admin_id failed: %s", e)
+        admin_id_val = None
+
+    is_admin = (admin_id_val is not None and requester_chat_id == admin_id_val)
+    logging.info("ADMIN FLAG: requester=%r admin=%r is_admin=%r", requester_chat_id, admin_id_val, is_admin)
+
+    target_chat_id: Optional[int] = None
+    target_student_name: Optional[str] = None
+
+    if is_admin and context.args:
+        arg_name = _normalize_name(context.args[0])
+        cid = _name_to_chat_id(arg_name)
+        if cid is None:
+            await context.bot.send_message(requester_chat_id, "User not found")
+            return
+        target_chat_id = cid
+        target_student_name = arg_name
+    else:
+        target_chat_id = requester_chat_id
+        target_student_name = chat_id_to_student(requester_chat_id)
+        if not target_student_name:
+            if is_admin:
+                await context.bot.send_message(
+                    requester_chat_id,
+                    "ℹ️ You are admin. Provide a student name as an argument, e.g. `/status_date Ivan`.",
+                    parse_mode="Markdown",
+                )
+            else:
+                await context.bot.send_message(
+                    requester_chat_id,
+                    "⛔️ You don't have access to this bot."
+                )
+            return
+
+    # Always recompute to get fresh data
+    try:
+        nums_by_date = await asyncio.to_thread(doneOrNotWithDates, student_name=target_student_name)
+        formatted_msg = format_missing_tasks_by_date_markdown(nums_by_date)
+    except Exception:
+        logging.exception("on_status_date failed for %s", target_student_name)
+        await context.bot.send_message(
+            requester_chat_id,
+            "⚠️ Failed to get progress. Please try again later."
+        )
+        return
+
+    if is_admin:
+        await context.bot.send_message(
+            requester_chat_id,
+            formatted_msg,
+            parse_mode="Markdown"
+        )
+    else:
+        recipients = {requester_chat_id}
+        if admin_id_val:
+            recipients.add(admin_id_val)
+
+        for chat_id in recipients:
+            if chat_id == admin_id_val and chat_id != requester_chat_id:
+                admin_copy = f"👤 *Student:* `{target_student_name}`\n\n{formatted_msg}"
+                await context.bot.send_message(chat_id, admin_copy, parse_mode="Markdown")
+            else:
+                await context.bot.send_message(chat_id, formatted_msg, parse_mode="Markdown")
+
+
 async def on_hw_echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin-only: /hw_echo <username> — insert Mongo 'add_homework_to_<username>' echo to trigger watcher cache recompute."""
     if not update.effective_chat:
@@ -439,6 +542,7 @@ async def on_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ----------------- PTB APP INIT -----------------
 async def _post_init(app):
     app.add_handler(CommandHandler(["todo", "progress", "status", "check"], on_status))
+    app.add_handler(CommandHandler(["todo_date", "progress_date", "status_date", "check_date"], on_status_date))
     app.add_handler(CommandHandler(["debug_admin"], debug_admin))
     app.add_handler(CommandHandler(["hw_echo"], on_hw_echo))
     app.add_handler(CommandHandler(["send"], on_send))

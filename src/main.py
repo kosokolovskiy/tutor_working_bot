@@ -17,3 +17,9 @@ def doneOrNot(student_name: str, ):
     obj = DBAnalyzer()
     return obj.findNotDone(student_name)
 
+def doneOrNotWithDates(student_name: str):
+    """Возвращает невыполненные задания, сгруппированные по датам."""
+    print('Start of Analysis with Dates...')
+    obj = DBAnalyzer()
+    return obj.findNotDoneWithDates(student_name)
+
