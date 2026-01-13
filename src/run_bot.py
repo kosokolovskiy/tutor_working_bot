@@ -982,7 +982,7 @@ async def on_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ----------------- PTB APP INIT -----------------
 async def _post_init(app):
     app.add_handler(CommandHandler(["todo", "progress", "status", "check"], on_status))
-    app.add_handler(CommandHandler(["todo_date", "progress_date", "status_date", "check_date"], on_status_date))
+    app.add_handler(CommandHandler(["todod", "progress_date", "status_date", "check_date"], on_status_date))
     app.add_handler(InlineQueryHandler(on_inline_query))
     app.add_handler(ChosenInlineResultHandler(on_chosen_inline_result))
     app.add_handler(CommandHandler(["debug_admin"], debug_admin))
