@@ -1001,5 +1001,3 @@ if __name__ == '__main__':
     app = MyBot.run_bot(TOKEN)
     app.post_init = _post_init
     app.run_polling()
-
-
